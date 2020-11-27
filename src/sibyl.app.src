@@ -1,0 +1,20 @@
+{application, sibyl,
+ [{description, "An OTP application"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {mod, {sibyl_app, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    lager,
+    erlbus,
+    chatterbox,
+    lib_http2_handler
+   ]},
+  {included_applications, [blockchain]},
+  {env,[]},
+  {modules, []},
+
+  {licenses, ["Apache 2.0"]},
+  {links, []}
+ ]}.
