@@ -53,7 +53,7 @@ init_per_testcase(TestCase, Config) ->
 
     application:ensure_all_started(gun),
     application:ensure_all_started(throttle),
-    application:ensure_all_started(ebus),
+    application:ensure_all_started(erlbus),
 
     Config1 = test_utils:init_per_testcase(TestCase, Config0),
 

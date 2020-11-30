@@ -135,7 +135,7 @@ add_commit_hooks() ->
     %% add any required commit hooks to the ledger
     %% so as we can get updates for those CFs we are interested in
     RoutingFun = fun(RouteUpdate) ->
-        ebus:pub(?EVENT_ROUTING_UPDATE, {event, ?EVENT_ROUTING_UPDATE, RouteUpdate})
+        erlbus:pub(?EVENT_ROUTING_UPDATE, {event, ?EVENT_ROUTING_UPDATE, RouteUpdate})
     end,
     Ref = blockchain_worker:add_commit_hook(routing, RoutingFun),
     {ok, [Ref]}.

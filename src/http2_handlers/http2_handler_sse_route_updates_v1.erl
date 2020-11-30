@@ -32,7 +32,7 @@ handle_on_request_end_stream(
     State
 ) ->
     %% subscribe to events using the relevant topic
-    ebus:sub(self(), ?EVENT_ROUTING_UPDATE),
+    erlbus:sub(self(), ?EVENT_ROUTING_UPDATE),
     %% return the event-stream header to client
     {ok,
         State#state{
