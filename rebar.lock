@@ -39,7 +39,7 @@
   1},
  {<<"erlbus">>,
   {git,"https://github.com/andymck/erlbus.git",
-       {ref,"a45b9ab7d22206b38c97ab9a163f6b0f52ef91ee"}},
+       {ref,"9b8304527ba1485e9be0281bc84e64adfbebf0ec"}},
   0},
  {<<"exor_filter">>,
   {git,"https://github.com/mpope9/exor_filter",

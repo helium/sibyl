@@ -11,7 +11,7 @@
     chatterbox,
     lib_http2_handler
    ]},
-  {included_applications, [blockchain]},
+  {included_applications, []},
   {env,[]},
   {modules, []},
 
