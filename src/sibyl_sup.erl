@@ -39,7 +39,7 @@
 }).
 
 -define(FLAGS, #{
-    strategy => rest_for_one,
+    strategy => one_for_one,
     intensity => 1,
     period => 5
 }).
@@ -67,8 +67,16 @@ init([]) ->
             {http2_client_ref_header_name, <<"x-gateway-id">>}
         ]
     ),
+
+    {ok, _Server} = grpc:start_server(grpc, tcp, 10000, #{
+        'routes_v1' => #{handler => routes_v1_server}
+    }),
+
+    application:ensure_all_started(grpcbox),
+
     {ok,
         {?FLAGS, [
+            ?SUP(route_updates_sup, []),
             ?SUP(chatterbox_sup, []),
             ?WORKER(sibyl_mgr, [])
         ]}}.

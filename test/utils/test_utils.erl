@@ -5,7 +5,8 @@
     end_per_testcase/2,
     tmp_dir/0, tmp_dir/1,
     init_base_dir_config/3,
-    wait_until/1, wait_until/3
+    wait_until/1, wait_until/3,
+    wait_for/1, wait_for/3
 ]).
 
 -include_lib("helium_proto/include/blockchain_state_channel_v1_pb.hrl").
@@ -84,6 +85,21 @@ wait_until(Fun, Retry, Delay) when Retry > 0 ->
         _ ->
             timer:sleep(Delay),
             wait_until(Fun, Retry - 1, Delay)
+    end.
+
+wait_for(Fun) ->
+    wait_for(Fun, 100, 100).
+
+wait_for(Fun, Retry, Delay) when Retry > 0 ->
+    Res = Fun(),
+    case Res of
+        {true, Resp} ->
+            {ok, Resp};
+        _ when Retry == 1 ->
+            {fail, Res};
+        _ ->
+            timer:sleep(Delay),
+            wait_for(Fun, Retry - 1, Delay)
     end.
 
 %% ------------------------------------------------------------------
