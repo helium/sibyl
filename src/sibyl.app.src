@@ -9,7 +9,9 @@
     lager,
     erlbus,
     chatterbox,
-    lib_http2_handler
+    lib_http2_handler,
+    grpc,
+    grpc_client
    ]},
   {included_applications, []},
   {env,[]},
