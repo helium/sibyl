@@ -110,6 +110,8 @@ get_routes_test(Config) ->
 
     %% connect via grpc and get the current route data
     {ok, Connection} = grpc_client:connect(tcp, "localhost", 10000),
+    %% routes_v1_client is an auto generated helper file
+    %% routes_v1 = service, get_routes = RPC call, routes_v1 = decoder, ie the PB generated encode/decode file
     {ok, #{headers := Headers, result := Result} = _Resp} = routes_v1_client:get_routes(
         Connection,
         #{},
@@ -143,6 +145,7 @@ route_updates_test(Config) ->
     %% the stream requires an empty msg to be sent in order to initialise the service
     %% TODO - any way around having to send the empty msg ?
     {ok, Connection} = grpc_client:connect(tcp, "localhost", 10000),
+    %% routes_v1 = service, stream_route_updates = RPC call, routes_v1 = decoder, ie the PB generated encode/decode file
     {ok, Stream} = grpc_client:new_stream(Connection, routes_v1, stream_route_updates, routes_v1),
     grpc_client:send(Stream, #{}),
 
