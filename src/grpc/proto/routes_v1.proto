@@ -48,7 +48,7 @@ message routing_v1_response {
 }
 
 message routing_v1_update {
-  routing_v1 route = 1;
+  repeated routing_v1 routes = 1;
   bytes signature = 2;
   uint64 height = 3;
   bytes action = 4;

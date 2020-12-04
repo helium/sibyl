@@ -98,7 +98,7 @@ handle_cast(_Msg, State) ->
 handle_info(setup, State) ->
     try blockchain_worker:blockchain() of
         undefined ->
-            lager:debug("chain not ready, will try again"),
+            lager:debug("chain not ready, will try again in a bit"),
             erlang:send_after(2000, self(), setup),
             {noreply, State};
         Chain ->
@@ -108,6 +108,7 @@ handle_info(setup, State) ->
             ets:insert(?TID, {?CHAIN, Chain}),
             ets:insert(?TID, {?SIGFUN, SigFun}),
             {ok, Refs} = add_commit_hooks(),
+            ok = subscribe_to_events(),
             {noreply, State#state{commit_hook_refs = Refs}}
     catch
         _:_ ->
@@ -119,6 +120,16 @@ handle_info({blockchain_event, {new_chain, NC}}, State = #state{commit_hook_refs
     ets:insert(?TID, {?CHAIN, NC}),
     {ok, NewRefs} = add_commit_hooks(),
     {noreply, State#state{commit_hook_refs = NewRefs}};
+handle_info(
+    {event, EventTopic, _Updates} = _Msg,
+    State
+) ->
+    Chain = ?MODULE:blockchain(),
+    Ledger = blockchain:ledger(Chain),
+    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
+    true = ?MODULE:update_last_modified(EventTopic, CurHeight),
+    lager:debug("updated last modified height for event ~p with height ~p", [EventTopic, CurHeight]),
+    {noreply, State};
 handle_info(_Msg, State) ->
     lager:debug("rcvd unknown info msg: ~p", [_Msg]),
     {noreply, State}.
@@ -140,3 +151,11 @@ add_commit_hooks() ->
     Ref = blockchain_worker:add_commit_hook(routing, RoutingFun),
     {ok, [Ref]}.
 
+-spec subscribe_to_events() -> ok.
+subscribe_to_events() ->
+    %% the mgr will subscribe to all published hook events
+    %% and for each event type update the height in its ETS table
+    %% at which the type was last updated
+    %% it wont actually process the events
+    [erlbus:sub(self(), E) || E <- ?ALL_EVENTS],
+    ok.

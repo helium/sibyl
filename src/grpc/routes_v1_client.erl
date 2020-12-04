@@ -21,7 +21,7 @@
 }.
 
 -type routing_v1_update() :: #{
-    route => routing_v1(),
+    routes => [routing_v1()],
     signature => binary(),
     height => integer(),
     action => binary()

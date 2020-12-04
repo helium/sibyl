@@ -76,9 +76,9 @@
     }.
 
 -type routing_v1_update() ::
-    % = 1, optional
+    % = 1, repeated
     #{
-        route => routing_v1(),
+        routes => [routing_v1()],
         % = 2, optional
         signature => iodata(),
         % = 3, optional, 64 bits
@@ -222,15 +222,11 @@ encode_msg_routing_v1_update(Msg, TrUserData) ->
 encode_msg_routing_v1_update(#{} = M, Bin, TrUserData) ->
     B1 =
         case M of
-            #{route := F1} ->
-                begin
-                    TrF1 = id(F1, TrUserData),
-                    if
-                        TrF1 =:= undefined ->
-                            Bin;
-                        true ->
-                            e_mfield_routing_v1_update_route(TrF1, <<Bin/binary, 10>>, TrUserData)
-                    end
+            #{routes := F1} ->
+                TrF1 = id(F1, TrUserData),
+                if
+                    TrF1 == [] -> Bin;
+                    true -> e_field_routing_v1_update_routes(TrF1, Bin, TrUserData)
                 end;
             _ ->
                 Bin
@@ -307,10 +303,17 @@ e_field_routing_v1_response_routes([Elem | Rest], Bin, TrUserData) ->
 e_field_routing_v1_response_routes([], Bin, _TrUserData) ->
     Bin.
 
-e_mfield_routing_v1_update_route(Msg, Bin, TrUserData) ->
+e_mfield_routing_v1_update_routes(Msg, Bin, TrUserData) ->
     SubBin = encode_msg_routing_v1(Msg, <<>>, TrUserData),
     Bin2 = e_varint(byte_size(SubBin), Bin),
     <<Bin2/binary, SubBin/binary>>.
+
+e_field_routing_v1_update_routes([Elem | Rest], Bin, TrUserData) ->
+    Bin2 = <<Bin/binary, 10>>,
+    Bin3 = e_mfield_routing_v1_update_routes(id(Elem, TrUserData), Bin2, TrUserData),
+    e_field_routing_v1_update_routes(Rest, Bin3, TrUserData);
+e_field_routing_v1_update_routes([], Bin, _TrUserData) ->
+    Bin.
 
 -compile({nowarn_unused_function, e_type_sint/3}).
 
@@ -1327,7 +1330,7 @@ decode_msg_routing_v1_update(Bin, TrUserData) ->
         0,
         0,
         0,
-        id('$undef', TrUserData),
+        id([], TrUserData),
         id(<<>>, TrUserData),
         id(0, TrUserData),
         id(<<>>, TrUserData),
@@ -1345,7 +1348,7 @@ dfp_read_field_def_routing_v1_update(
     F@_4,
     TrUserData
 ) ->
-    d_field_routing_v1_update_route(Rest, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData);
+    d_field_routing_v1_update_routes(Rest, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData);
 dfp_read_field_def_routing_v1_update(
     <<18, Rest/binary>>,
     Z1,
@@ -1382,11 +1385,11 @@ dfp_read_field_def_routing_v1_update(
     TrUserData
 ) ->
     d_field_routing_v1_update_action(Rest, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData);
-dfp_read_field_def_routing_v1_update(<<>>, 0, 0, _, F@_1, F@_2, F@_3, F@_4, _) ->
+dfp_read_field_def_routing_v1_update(<<>>, 0, 0, _, R1, F@_2, F@_3, F@_4, TrUserData) ->
     S1 = #{signature => F@_2, height => F@_3, action => F@_4},
     if
-        F@_1 == '$undef' -> S1;
-        true -> S1#{route => F@_1}
+        R1 == '$undef' -> S1;
+        true -> S1#{routes => lists_reverse(R1, TrUserData)}
     end;
 dfp_read_field_def_routing_v1_update(Other, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData) ->
     dg_read_field_def_routing_v1_update(Other, Z1, Z2, F, F@_1, F@_2, F@_3, F@_4, TrUserData).
@@ -1427,7 +1430,7 @@ dg_read_field_def_routing_v1_update(
     Key = X bsl N + Acc,
     case Key of
         10 ->
-            d_field_routing_v1_update_route(Rest, 0, 0, 0, F@_1, F@_2, F@_3, F@_4, TrUserData);
+            d_field_routing_v1_update_routes(Rest, 0, 0, 0, F@_1, F@_2, F@_3, F@_4, TrUserData);
         18 ->
             d_field_routing_v1_update_signature(Rest, 0, 0, 0, F@_1, F@_2, F@_3, F@_4, TrUserData);
         24 ->
@@ -1498,14 +1501,14 @@ dg_read_field_def_routing_v1_update(
                     )
             end
     end;
-dg_read_field_def_routing_v1_update(<<>>, 0, 0, _, F@_1, F@_2, F@_3, F@_4, _) ->
+dg_read_field_def_routing_v1_update(<<>>, 0, 0, _, R1, F@_2, F@_3, F@_4, TrUserData) ->
     S1 = #{signature => F@_2, height => F@_3, action => F@_4},
     if
-        F@_1 == '$undef' -> S1;
-        true -> S1#{route => F@_1}
+        R1 == '$undef' -> S1;
+        true -> S1#{routes => lists_reverse(R1, TrUserData)}
     end.
 
-d_field_routing_v1_update_route(
+d_field_routing_v1_update_routes(
     <<1:1, X:7, Rest/binary>>,
     N,
     Acc,
@@ -1516,7 +1519,7 @@ d_field_routing_v1_update_route(
     F@_4,
     TrUserData
 ) when N < 57 ->
-    d_field_routing_v1_update_route(
+    d_field_routing_v1_update_routes(
         Rest,
         N + 7,
         X bsl N + Acc,
@@ -1527,7 +1530,7 @@ d_field_routing_v1_update_route(
         F@_4,
         TrUserData
     );
-d_field_routing_v1_update_route(
+d_field_routing_v1_update_routes(
     <<0:1, X:7, Rest/binary>>,
     N,
     Acc,
@@ -1548,10 +1551,7 @@ d_field_routing_v1_update_route(
         0,
         0,
         F,
-        if
-            Prev == '$undef' -> NewFValue;
-            true -> merge_msg_routing_v1(Prev, NewFValue, TrUserData)
-        end,
+        cons(NewFValue, Prev, TrUserData),
         F@_2,
         F@_3,
         F@_4,
@@ -1919,12 +1919,12 @@ merge_msg_routing_v1_update(PMsg, NMsg, TrUserData) ->
     S1 = #{},
     S2 =
         case {PMsg, NMsg} of
-            {#{route := PFroute}, #{route := NFroute}} ->
-                S1#{route => merge_msg_routing_v1(PFroute, NFroute, TrUserData)};
-            {_, #{route := NFroute}} ->
-                S1#{route => NFroute};
-            {#{route := PFroute}, _} ->
-                S1#{route => PFroute};
+            {#{routes := PFroutes}, #{routes := NFroutes}} ->
+                S1#{routes => 'erlang_++'(PFroutes, NFroutes, TrUserData)};
+            {_, #{routes := NFroutes}} ->
+                S1#{routes => NFroutes};
+            {#{routes := PFroutes}, _} ->
+                S1#{routes => PFroutes};
             {_, _} ->
                 S1
         end,
@@ -2085,8 +2085,16 @@ v_msg_routing_v1_response(X, Path, _TrUserData) ->
 
 v_msg_routing_v1_update(#{} = M, Path, TrUserData) ->
     case M of
-        #{route := F1} -> v_msg_routing_v1(F1, [route | Path], TrUserData);
-        _ -> ok
+        #{routes := F1} ->
+            if
+                is_list(F1) ->
+                    _ = [v_msg_routing_v1(Elem, [routes | Path], TrUserData) || Elem <- F1],
+                    ok;
+                true ->
+                    mk_type_error({invalid_list_of, {msg, routing_v1}}, F1, [routes | Path])
+            end;
+        _ ->
+            ok
     end,
     case M of
         #{signature := F2} -> v_type_bytes(F2, [signature | Path], TrUserData);
@@ -2102,7 +2110,7 @@ v_msg_routing_v1_update(#{} = M, Path, TrUserData) ->
     end,
     lists:foreach(
         fun
-            (route) -> ok;
+            (routes) -> ok;
             (signature) -> ok;
             (height) -> ok;
             (action) -> ok;
@@ -2267,11 +2275,11 @@ get_msg_defs() ->
         ]},
         {{msg, routing_v1_update}, [
             #{
-                name => route,
+                name => routes,
                 fnum => 1,
                 rnum => 2,
                 type => {msg, routing_v1},
-                occurrence => optional,
+                occurrence => repeated,
                 opts => []
             },
             #{
@@ -2358,11 +2366,11 @@ find_msg_def(routing_v1_response) ->
 find_msg_def(routing_v1_update) ->
     [
         #{
-            name => route,
+            name => routes,
             fnum => 1,
             rnum => 2,
             type => {msg, routing_v1},
-            occurrence => optional,
+            occurrence => repeated,
             opts => []
         },
         #{
