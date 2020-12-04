@@ -120,7 +120,7 @@ handle_info({blockchain_event, {new_chain, NC}}, State = #state{commit_hook_refs
     {ok, NewRefs} = add_commit_hooks(),
     {noreply, State#state{commit_hook_refs = NewRefs}};
 handle_info(_Msg, State) ->
-    lager:warning("rcvd unknown info msg: ~p", [_Msg]),
+    lager:debug("rcvd unknown info msg: ~p", [_Msg]),
     {noreply, State}.
 
 terminate(_Reason, _State = #state{commit_hook_refs = Refs}) ->
@@ -139,3 +139,4 @@ add_commit_hooks() ->
     end,
     Ref = blockchain_worker:add_commit_hook(routing, RoutingFun),
     {ok, [Ref]}.
+

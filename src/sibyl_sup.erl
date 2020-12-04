@@ -72,8 +72,6 @@ init([]) ->
         'routes_v1' => #{handler => routes_v1_server}
     }),
 
-    application:ensure_all_started(grpcbox),
-
     {ok,
         {?FLAGS, [
             ?SUP(route_updates_sup, []),

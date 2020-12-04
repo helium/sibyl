@@ -48,7 +48,6 @@ decoder() -> routes_v1.
     {routing_v1_response(), grpc:stream()} | grpc:error_response().
 %% This is a unary RPC
 get_routes(_Message, Stream, _State) ->
-    lager:debug("pid: ~p stream: ~p, state: ~p", [self(), Stream, _State]),
     Chain = sibyl_mgr:blockchain(),
     Ledger = blockchain:ledger(Chain),
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
