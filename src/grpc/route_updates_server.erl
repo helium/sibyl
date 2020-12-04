@@ -81,8 +81,8 @@ maybe_send_inital_all_routes_msg(Stream) ->
     Headers = grpc:metadata(Stream),
     ClientLastRequestHeight = sibyl_utils:ensure(
         integer_or_default,
-        maps:get(?CLIENT_HEIGHT_HEADER, Headers, 1),
-        1
+        maps:get(?CLIENT_HEIGHT_HEADER, Headers, 0),
+        0
     ),
     LastModifiedHeight = sibyl_mgr:get_last_modified(?EVENT_ROUTING_UPDATE),
     case is_data_modified(ClientLastRequestHeight, LastModifiedHeight) of

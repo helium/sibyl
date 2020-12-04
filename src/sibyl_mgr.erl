@@ -58,7 +58,7 @@ get_last_modified(Event) ->
     try ets:lookup_element(?TID, Event, 2) of
         X -> X
     catch
-        _:_ -> 1
+        _:_ -> undefined
     end.
 
 -spec blockchain() -> blockchain:blockchain() | undefined.
