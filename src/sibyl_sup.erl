@@ -51,31 +51,9 @@ start_link() ->
 
 init([]) ->
     {ok, _} = application:ensure_all_started(lager),
-    %% set route and client ref header config for chatterbox
-    %% if a new http2 handler is added, be sure to add its route/path and
-    %% associated module to the fun below
-    RouterHttp2HandlerRoutingFun = fun
-        (<<"/v1/routes">>) -> {ok, http2_handler_routes_v1};
-        (<<"/v1/events/route_updates", _Topic/binary>>) -> {ok, http2_handler_sse_route_updates_v1};
-        (UnknownRequestType) -> {error, {handler_not_found, UnknownRequestType}}
-    end,
-    ok = application:set_env(
-        chatterbox,
-        stream_callback_opts,
-        [
-            {http2_handler_routing_fun, RouterHttp2HandlerRoutingFun},
-            {http2_client_ref_header_name, <<"x-gateway-id">>}
-        ]
-    ),
-
-    {ok, _Server} = grpc:start_server(grpc, tcp, 10000, #{
-        'routes_v1' => #{handler => routes_v1_server}
-    }),
-
     {ok,
         {?FLAGS, [
-            ?SUP(route_updates_sup, []),
-            ?SUP(chatterbox_sup, []),
+            ?SUP(routing_updates_sup, []),
             ?WORKER(sibyl_mgr, [])
         ]}}.
 
