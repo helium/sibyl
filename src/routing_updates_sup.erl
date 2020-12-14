@@ -1,11 +1,11 @@
--module(route_updates_sup).
+-module(routing_updates_sup).
 
 -behaviour(supervisor).
 
 -export([
     init/1,
     start_link/0,
-    start_route_stream_worker/1
+    start_route_stream_worker/2
 ]).
 
 -define(WORKER(I), #{
@@ -23,11 +23,11 @@
     period => 60
 }).
 
-start_route_stream_worker(Stream) ->
-    supervisor:start_child(?MODULE, [Stream]).
+start_route_stream_worker(Message, Stream) ->
+    supervisor:start_child(?MODULE, [Message, Stream]).
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    {ok, {?FLAGS, [?WORKER(route_updates_server)]}}.
+    {ok, {?FLAGS, [?WORKER(routing_updates_server)]}}.

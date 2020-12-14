@@ -2,8 +2,6 @@
 
 -include("sibyl.hrl").
 
--define(CLIENT_REF_NAME, <<"x-client-id">>).
-
 -export([
     all/0,
     init_per_testcase/2,
@@ -11,9 +9,8 @@
 ]).
 
 -export([
-    get_routes_test/1,
-    route_updates_with_initial_msg_test/1,
-    route_updates_without_initial_msg_test/1
+    routing_updates_with_initial_msg_test/1,
+    routing_updates_without_initial_msg_test/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -31,9 +28,8 @@
 %%--------------------------------------------------------------------
 all() ->
     [
-        get_routes_test,
-        route_updates_with_initial_msg_test,
-        route_updates_without_initial_msg_test
+        routing_updates_with_initial_msg_test,
+        routing_updates_without_initial_msg_test
     ].
 
 %%--------------------------------------------------------------------
@@ -50,6 +46,7 @@ init_per_testcase(TestCase, Config) ->
     application:ensure_all_started(gun),
     application:ensure_all_started(throttle),
     application:ensure_all_started(erlbus),
+    application:ensure_all_started(grpcbox),
 
     Config1 = test_utils:init_per_testcase(TestCase, Config0),
 
@@ -71,70 +68,7 @@ end_per_testcase(TestCase, Config) ->
 %% TEST CASES
 %%--------------------------------------------------------------------
 
-get_routes_test(Config) ->
-    %% verify the grpc get request to pull all routing data
-    ConsensusMembers = ?config(consensus_members, Config),
-    Swarm = ?config(swarm, Config),
-
-    Chain = blockchain_worker:blockchain(),
-    Ledger = blockchain:ledger(Chain),
-
-    [_, {Payer, {_, PayerPrivKey, _}} | _] = ConsensusMembers,
-    SigFun = libp2p_crypto:mk_sig_fun(PayerPrivKey),
-
-    meck:new(blockchain_txn_oui_v1, [no_link, passthrough]),
-    meck:expect(blockchain_ledger_v1, check_dc_or_hnt_balance, fun(_, _, _, _) -> ok end),
-    meck:expect(blockchain_ledger_v1, debit_fee, fun(_, _, _, _) -> ok end),
-
-    OUI1 = 1,
-    Addresses0 = [libp2p_swarm:pubkey_bin(Swarm)],
-    {Filter, _} = xor16:to_bin(xor16:new([], fun xxhash:hash64/1)),
-    OUITxn0 = blockchain_txn_oui_v1:new(OUI1, Payer, Addresses0, Filter, 8),
-    SignedOUITxn0 = blockchain_txn_oui_v1:sign(OUITxn0, SigFun),
-
-    %% confirm we have no routing data at this point
-    %% then add the OUI block
-    ?assertEqual({error, not_found}, blockchain_ledger_v1:find_routing(OUI1, Ledger)),
-
-    {ok, Block0} = blockchain_test_utils:create_block(ConsensusMembers, [SignedOUITxn0]),
-    _ = blockchain_gossip_handler:add_block(Block0, Chain, self(), blockchain_swarm:swarm()),
-
-    ok = test_utils:wait_until(fun() -> {ok, 2} == blockchain:height(Chain) end),
-
-    Routing0 = blockchain_ledger_routing_v1:new(
-        OUI1,
-        Payer,
-        Addresses0,
-        Filter,
-        <<0:25/integer-unsigned-big,
-            (blockchain_ledger_routing_v1:subnet_size_to_mask(8)):23/integer-unsigned-big>>,
-        0
-    ),
-    ?assertEqual({ok, Routing0}, blockchain_ledger_v1:find_routing(OUI1, Ledger)),
-
-    %% connect via grpc and get the current route data
-    {ok, Connection} = grpc_client:connect(tcp, "localhost", 10000),
-    %% routes_v1_client is an auto generated helper file
-    %% routes_v1 = service, get_routes = RPC call, routes_v1 = decoder, ie the PB generated encode/decode file
-    {ok, #{headers := Headers, result := Result} = _Resp} = routes_v1_client:get_routes(
-        Connection,
-        #{},
-        []
-    ),
-    ct:pal("Response Headers: ~p", [Headers]),
-    ct:pal("Response Body: ~p", [Result]),
-    #{<<":status">> := HttpStatus} = Headers,
-    ?assertEqual(HttpStatus, <<"200">>),
-    assert_route_response(Result, [Routing0]),
-
-    %% get the routes again, this time present the client last height header
-    %% we will set this to a height equal to the current height
-    %% we should get a 304 not modified response
-    %% TODO - Add this support
-
-    ok.
-
-route_updates_with_initial_msg_test(Config) ->
+routing_updates_with_initial_msg_test(Config) ->
     %% add a bunch of routing data and confirm client receives streaming updates for each update
     ConsensusMembers = ?config(consensus_members, Config),
     Swarm = ?config(swarm, Config),
@@ -176,15 +110,22 @@ route_updates_with_initial_msg_test(Config) ->
     ?assertEqual({ok, Routing0}, blockchain_ledger_v1:find_routing(OUI1, Ledger)),
 
     %% setup the grpc connection and open a stream
-    {ok, Connection} = grpc_client:connect(tcp, "localhost", 10000),
+    {ok, Connection} = grpc_client:connect(tcp, "localhost", 10001),
     %% routes_v1 = service, stream_route_updates = RPC call, routes_v1 = decoder, ie the PB generated encode/decode file
-    {ok, Stream} = grpc_client:new_stream(Connection, routes_v1, stream_route_updates, routes_v1),
+    {ok, Stream} = grpc_client:new_stream(
+        Connection,
+        'helium.validator',
+        routing,
+        validator_pb
+    ),
     %% the stream requires an empty msg to be sent in order to initialise the service
     %% TODO - any way around having to send the empty msg ?
-    grpc_client:send(Stream, #{}),
+    grpc_client:send(Stream, #{height => 1}),
 
     %% NOTE: we established this connection *after* the above route update, so there should be a single route on the ledger
     %% and as we established the connection after, we will not get a streamed update msg for this route change
+
+    %%    {ok, Stream} = grpcbox_routes_v1_service_client:stream_route_updates(#{}),
 
     %% NOTE: the server will send the headers first before any data msg
     %%       but will only send them at the point of the first data msg being sent
@@ -199,6 +140,8 @@ route_updates_with_initial_msg_test(Config) ->
             end
         end
     ),
+
+    %%    {ok, Headers} = grpcbox_client:recv_headers(Stream),
     ct:pal("Response Headers: ~p", [Headers]),
     #{<<":status">> := HttpStatus} = Headers,
     ?assertEqual(HttpStatus, <<"200">>),
@@ -206,34 +149,21 @@ route_updates_with_initial_msg_test(Config) ->
     %% now check for and assert the first data msg sent by the server,
     %% In this case the first data msg will be a route_v1_update msg containing all current routes
 
-    %% this is because the client did not specify the header 'x-client-height'
+    %% this is because the client specified a height of 1
     %% this can be used by the client to tell the server that it has all known routes at the specified height
     %% so if the client already has known routes up to a known height and doesnt need the same
     %% data back, then the client can use this header to tell the server
     %% the server will then only respond with all routes if the routes have been modified
     %% since the presented height
-    %% if the header is not presented by the client, then all routes will be returned in the servers
-    %% first data msg after initial stream connect
 
     %% get all expected routes from the ledger to compare against the msg streamed to client
     {ok, ExpRoutes} = blockchain_ledger_v1:get_routes(Ledger),
     ct:pal("Expected routes ~p", [ExpRoutes]),
 
     %% confirm the received first data msg matches above routes
-    {ok, RouteRespPB} = test_utils:wait_for(
-        fun() ->
-            case grpc_client:get(Stream) of
-                empty ->
-                    false;
-                {data, Data} ->
-                    {true, Data}
-            end
-        end
-    ),
+    {data, RouteRespPB} = grpc_client:rcv(Stream, 5000),
     ct:pal("Route Update: ~p", [RouteRespPB]),
     assert_route_update(RouteRespPB, ExpRoutes),
-    %% check the msg action value, should be 'all' to indicate ALL routes are included
-    ?assertEqual(maps:get(action, RouteRespPB, undefined), <<"all">>),
 
     %% add a new route - and then confirm we get a streamed update of same
     #{public := NewPubKey, secret := _PrivKey} = libp2p_crypto:generate_keys(ed25519),
@@ -257,20 +187,9 @@ route_updates_with_initial_msg_test(Config) ->
     ?assertEqual({ok, Routing1}, blockchain_ledger_v1:find_routing(OUI1, Ledger)),
 
     %% confirm we received an event associated with the above change
-    {ok, RouteUpdate1} = test_utils:wait_for(
-        fun() ->
-            case grpc_client:get(Stream) of
-                empty ->
-                    false;
-                {data, Data} ->
-                    {true, Data}
-            end
-        end
-    ),
+    {data, RouteUpdate1} = grpc_client:rcv(Stream, 5000),
     ct:pal("Route Update: ~p", [RouteUpdate1]),
     assert_route_update(RouteUpdate1, [Routing1]),
-    %% check the msg action value, should be 'put' to indicate new route added
-    ?assertEqual(maps:get(action, RouteUpdate1, undefined), <<"put">>),
 
     %% add a new route - and then confirm we get a streamed update of same
     OUITxn3 = blockchain_txn_routing_v1:request_subnet(OUI1, Payer, 32, 2),
@@ -306,13 +225,11 @@ route_updates_with_initial_msg_test(Config) ->
     ),
     ct:pal("Route Update: ~p", [RouteUpdate2]),
     assert_route_update(RouteUpdate2, [Routing2]),
-    %% check the msg action value, should be 'put' to indicate new route added
-    ?assertEqual(maps:get(action, RouteUpdate2, undefined), <<"put">>),
 
     meck:unload(blockchain_txn_oui_v1),
     ok.
 
-route_updates_without_initial_msg_test(Config) ->
+routing_updates_without_initial_msg_test(Config) ->
     %% add a bunch of routing data and confirm client receives streaming updates for each update
     ConsensusMembers = ?config(consensus_members, Config),
     Swarm = ?config(swarm, Config),
@@ -355,21 +272,19 @@ route_updates_without_initial_msg_test(Config) ->
 
     %% get current height and add 1 and use for client header
     {ok, CurHeight0} = blockchain:height(Chain),
-    ClientHeaderHeight = list_to_binary(integer_to_list(CurHeight0 + 1)),
+    ClientHeaderHeight = CurHeight0 + 1,
 
     %% setup the grpc connection and open a stream
-    {ok, Connection} = grpc_client:connect(tcp, "localhost", 10000),
+    {ok, Connection} = grpc_client:connect(tcp, "localhost", 10001),
     %% routes_v1 = service, stream_route_updates = RPC call, routes_v1 = decoder, ie the PB generated encode/decode file
     {ok, Stream} = grpc_client:new_stream(
         Connection,
-        routes_v1,
-        stream_route_updates,
-        routes_v1,
-        [{metadata, #{<<"x-client-height">> => ClientHeaderHeight}}]
+        'helium.validator',
+        routing,
+        validator_pb
     ),
     %% the stream requires an empty msg to be sent in order to initialise the service
-    %% TODO - any way around having to send the empty msg ?
-    grpc_client:send(Stream, #{}),
+    grpc_client:send(Stream, #{height => ClientHeaderHeight}),
 
     %% NOTE: we established this connection *after* the above route update, so there should be a single route on the ledger
     %% and as we established the connection after, we will not get a streamed update msg for this route change
@@ -380,7 +295,7 @@ route_updates_without_initial_msg_test(Config) ->
     %% as the height specified in the header is equal to the height the routes were last updated
     %% as such when we check for streamed msgs at this point it should return empty
 
-    %% sleep to give the router_update_server to spawn
+    %%    %% sleep to give the router_update_server to spawn
     timer:sleep(1000),
     empty = grpc_client:get(Stream),
 
@@ -437,8 +352,6 @@ route_updates_without_initial_msg_test(Config) ->
     ),
     ct:pal("Route Update: ~p", [RouteUpdate1]),
     assert_route_update(RouteUpdate1, [Routing1]),
-    %% check the msg action value, should be 'put' to indicate new route added
-    ?assertEqual(maps:get(action, RouteUpdate1, undefined), <<"put">>),
 
     %% add a new route - and then confirm we get a streamed update of same
     OUITxn3 = blockchain_txn_routing_v1:request_subnet(OUI1, Payer, 32, 2),
@@ -474,8 +387,6 @@ route_updates_without_initial_msg_test(Config) ->
     ),
     ct:pal("Route Update: ~p", [RouteUpdate2]),
     assert_route_update(RouteUpdate2, [Routing2]),
-    %% check the msg action value, should be 'put' to indicate new route added
-    ?assertEqual(maps:get(action, RouteUpdate1, undefined), <<"put">>),
 
     meck:unload(blockchain_txn_oui_v1),
     ok.
@@ -488,7 +399,7 @@ route_updates_without_initial_msg_test(Config) ->
 %% Helper functions
 %% ------------------------------------------------------------------
 assert_route_update(RouteUpdate, ExpectedRoutes) ->
-    #{routes := Routes, signature := _Sig, height := _Height} = RouteUpdate,
+    #{routings := Routes, signature := _Sig, height := _Height} = RouteUpdate,
     lists:foldl(
         fun(R, Acc) -> assert_route(R, lists:nth(Acc, ExpectedRoutes)) end,
         1,
@@ -496,7 +407,7 @@ assert_route_update(RouteUpdate, ExpectedRoutes) ->
     ).
 
 assert_route_response(Response, ExpectedRoutes) ->
-    #{routes := Routes, signature := _Sig, height := _Height} = Response,
+    #{routings := Routes, signature := _Sig, height := _Height} = Response,
     lists:foldl(
         fun(R, Acc) -> assert_route(R, lists:nth(Acc, ExpectedRoutes)) end,
         1,
