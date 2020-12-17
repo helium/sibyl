@@ -116,7 +116,7 @@ routing_updates_with_initial_msg_test(Config) ->
         Connection,
         'helium.validator',
         routing,
-        validator_pb
+        validator_client_pb
     ),
     %% the stream requires an empty msg to be sent in order to initialise the service
     %% TODO - any way around having to send the empty msg ?
@@ -281,7 +281,7 @@ routing_updates_without_initial_msg_test(Config) ->
         Connection,
         'helium.validator',
         routing,
-        validator_pb
+        validator_client_pb
     ),
     %% the stream requires an empty msg to be sent in order to initialise the service
     grpc_client:send(Stream, #{height => ClientHeaderHeight}),

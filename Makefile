@@ -12,6 +12,10 @@ else
 MAKE="make"
 endif
 
+grpc:
+	REBAR_CONFIG="config/grpc_server_gen.config" $(REBAR) grpc gen && \
+	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
+
 compile:
 	$(REBAR) format && $(REBAR) compile
 
@@ -19,6 +23,7 @@ shell:
 	$(REBAR) shell
 
 clean:
+	rm -rf src/autogen
 	$(REBAR) clean
 
 cover:

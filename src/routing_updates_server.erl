@@ -150,7 +150,7 @@ to_routing_pb(Route) ->
         owner => blockchain_ledger_routing_v1:owner(Route),
         addresses => blockchain_ledger_routing_v1:addresses(Route),
         filters => blockchain_ledger_routing_v1:filters(Route),
-        subnet => blockchain_ledger_routing_v1:subnets(Route)
+        subnets => blockchain_ledger_routing_v1:subnets(Route)
     }.
 
 -spec is_data_modified(non_neg_integer(), non_neg_integer()) -> boolean().
