@@ -3,6 +3,7 @@
 -behaviour(gen_server).
 
 -include("../include/sibyl.hrl").
+-include("grpc/autogen/server/validator_pb.hrl").
 
 -record(state, {
     stream :: grpcbox_stream:t()
@@ -33,18 +34,18 @@
 %% ------------------------------------------------------------------
 %% API functions
 %% ------------------------------------------------------------------
--spec start_link(validator_pb:routing_reques(), any()) ->
+-spec start_link(non_neg_integer(), any()) ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}.
-start_link(RequestMsg, Stream) ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [RequestMsg, Stream], []).
+start_link(ClientHeight, Stream) ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [ClientHeight, Stream], []).
 
 %% ------------------------------------------------------------------
 %% gen_server functions
 %% ------------------------------------------------------------------
-init([RequestMsg, Stream] = _Args) ->
+init([ClientHeight, Stream] = _Args) ->
     lager:info("init with args ~p", [_Args]),
     erlbus:sub(self(), ?EVENT_ROUTING_UPDATE),
-    NewStream = maybe_send_inital_all_routes_msg(RequestMsg, Stream),
+    NewStream = maybe_send_inital_all_routes_msg(ClientHeight, Stream),
     {ok, #state{stream = NewStream}}.
 
 handle_call(_Msg, _From, State) ->
@@ -76,7 +77,7 @@ terminate(_Reason, _State = #state{}) ->
 %% ------------------------------------------------------------------
 -spec maybe_send_inital_all_routes_msg(validator_pb:routing_request(), grpc:stream()) ->
     grpc:stream().
-maybe_send_inital_all_routes_msg(#{height := ClientHeight} = _RequestMsg, Stream) ->
+maybe_send_inital_all_routes_msg(ClientHeight, Stream) ->
     %% get the height field from the request msg and only return
     %% the initial full set of routes if they were modified since that height
     LastModifiedHeight = sibyl_mgr:get_last_modified(?EVENT_ROUTING_UPDATE),
@@ -133,24 +134,24 @@ handle_routing_updates(
     blockchain_ledger_routing_v1:routing(),
     non_neg_integer(),
     function()
-) -> validator_pb:routing_response().
+) -> validator_pb:routing_response_pb().
 encode_response(_Action, Routes, Height, SigFun) ->
     RouteUpdatePB = [to_routing_pb(R) || R <- Routes],
-    Resp = #{
-        routes => RouteUpdatePB,
-        height => Height
+    Resp = #routing_response_pb{
+        routings = RouteUpdatePB,
+        height = Height
     },
-    EncodedRoutingInfoBin = validator_pb:encode_msg(Resp, routing_response),
-    Resp#{signature => SigFun(EncodedRoutingInfoBin)}.
+    EncodedRoutingInfoBin = validator_pb:encode_msg(Resp, routing_response_pb),
+    Resp#routing_response_pb{signature = SigFun(EncodedRoutingInfoBin)}.
 
--spec to_routing_pb(blockchain_ledger_routing_v1:routing()) -> validator_pb:routing().
+-spec to_routing_pb(blockchain_ledger_routing_v1:routing()) -> validator_pb:routing_pb().
 to_routing_pb(Route) ->
-    #{
-        oui => blockchain_ledger_routing_v1:oui(Route),
-        owner => blockchain_ledger_routing_v1:owner(Route),
-        addresses => blockchain_ledger_routing_v1:addresses(Route),
-        filters => blockchain_ledger_routing_v1:filters(Route),
-        subnets => blockchain_ledger_routing_v1:subnets(Route)
+    #routing_pb{
+        oui = blockchain_ledger_routing_v1:oui(Route),
+        owner = blockchain_ledger_routing_v1:owner(Route),
+        addresses = blockchain_ledger_routing_v1:addresses(Route),
+        filters = blockchain_ledger_routing_v1:filters(Route),
+        subnets = blockchain_ledger_routing_v1:subnets(Route)
     }.
 
 -spec is_data_modified(non_neg_integer(), non_neg_integer()) -> boolean().

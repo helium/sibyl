@@ -2,7 +2,8 @@
 
 -behavior(helium_validator_bhvr).
 
--include("../include/sibyl.hrl").
+-include("../../include/sibyl.hrl").
+-include("autogen/server/validator_pb.hrl").
 
 -record(handler_state, {
     worker_pid = undefined :: pid()
@@ -12,8 +13,8 @@
     routing/2
 ]).
 
-routing(Message, StreamState) ->
-    lager:debug("RPC routing called with msg ~p", [Message]),
+routing(#routing_request_pb{height=ClientHeight} = _Msg, StreamState) ->
+    lager:debug("RPC routing called with height ~p", [ClientHeight]),
     HandlerState = grpcbox_stream:stream_handler_state(StreamState),
     case HandlerState of
         undefined ->
@@ -26,7 +27,7 @@ routing(Message, StreamState) ->
                         {grpcbox_stream:code_to_status(14), <<"temporarily unavavailable">>}};
                 true ->
                     {ok, _WorkerPid} = routing_updates_sup:start_route_stream_worker(
-                        Message,
+                        ClientHeight,
                         StreamState
                     ),
                     lager:debug("started route update worker pid ~p", [_WorkerPid]),

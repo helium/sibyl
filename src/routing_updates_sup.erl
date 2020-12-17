@@ -23,8 +23,8 @@
     period => 60
 }).
 
-start_route_stream_worker(Message, Stream) ->
-    supervisor:start_child(?MODULE, [Message, Stream]).
+start_route_stream_worker(ClientHeight, Stream) ->
+    supervisor:start_child(?MODULE, [ClientHeight, Stream]).
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).

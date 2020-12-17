@@ -61,7 +61,6 @@ init_per_testcase(TestCase, Config) ->
 %%--------------------------------------------------------------------
 end_per_testcase(TestCase, Config) ->
     test_utils:end_per_testcase(TestCase, Config),
-    grpc:stop_server(grpc),
     catch exit(whereis(sibyl_sup)).
 
 %%--------------------------------------------------------------------
