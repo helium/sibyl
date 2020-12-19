@@ -13,7 +13,7 @@
     routing/2
 ]).
 
-routing(#routing_request_pb{height=ClientHeight} = _Msg, StreamState) ->
+routing(#routing_request_pb{height = ClientHeight} = _Msg, StreamState) ->
     lager:debug("RPC routing called with height ~p", [ClientHeight]),
     HandlerState = grpcbox_stream:stream_handler_state(StreamState),
     case HandlerState of

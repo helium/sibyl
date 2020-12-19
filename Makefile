@@ -25,7 +25,7 @@ grpc:
 	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
 
 clean:
-	rm -rf src/autogen
+	rm -rf $(grpc_services_directory)
 	$(REBAR) clean
 
 cover:
