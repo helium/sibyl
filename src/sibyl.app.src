@@ -9,7 +9,6 @@
     lager,
     erlbus,
     grpcbox,
-    grpc,
     grpc_client
    ]},
   {included_applications, []},
