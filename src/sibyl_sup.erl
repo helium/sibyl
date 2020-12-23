@@ -50,7 +50,6 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 init([]) ->
-    {ok, _} = application:ensure_all_started(lager),
     {ok,
         {?FLAGS, [
             ?SUP(routing_updates_sup, []),

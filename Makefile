@@ -21,7 +21,7 @@ shell:
 	$(REBAR) shell
 
 grpc:
-	REBAR_CONFIG="config/grpc_server_gen.config" $(REBAR) grpc gen && \
+	REBAR_CONFIG="config/grpc_server_gen.config" $(REBAR) grpc gen;\
 	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
 
 clean:
@@ -46,5 +46,5 @@ doc:
 	$(REBAR) edoc
 
 $(grpc_services_directory):
-	@echo "grpc service directory $(directory) does not exist, generating services"
-	make grpc
+	@echo "grpc service directory $(directory) does not exist, will generate services"
+	$(REBAR) get-deps;$(MAKE) grpc
