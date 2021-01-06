@@ -52,7 +52,6 @@ start_link() ->
 init([]) ->
     {ok,
         {?FLAGS, [
-            ?SUP(routing_updates_sup, []),
             ?WORKER(sibyl_mgr, [])
         ]}}.
 
