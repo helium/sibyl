@@ -426,4 +426,9 @@ assert_route(Route, ExpectedRoute) ->
     ?assertEqual(
         blockchain_ledger_routing_v1:subnets(ExpectedRoute),
         maps:get(subnets, Route)
+    ),
+    ?assertEqual(
+
+        maps:get(addresses, Route)
     ).
+
