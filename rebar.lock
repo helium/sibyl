@@ -30,7 +30,7 @@
   1},
  {<<"grpcbox">>,
   {git,"https://github.com/andymck/grpcbox.git",
-       {ref,"c5797ab9cca05d782ea84a542e03e50835991f5c"}},
+       {ref,"1f88abdaa2e7a5bbd74ef5f790a71d5b80b10cd9"}},
   0},
  {<<"hpack">>,{pkg,<<"hpack_erl">>,<<"0.2.3">>},2},
  {<<"lager">>,{pkg,<<"lager">>,<<"3.8.1">>},0},
