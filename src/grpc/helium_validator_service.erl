@@ -152,7 +152,7 @@ encode_response(_Action, Routes, Height, SigFun) ->
     EncodedRoutingInfoBin = validator_pb:encode_msg(Resp, routing_response_pb),
     Resp#routing_response_pb{signature = SigFun(EncodedRoutingInfoBin)}.
 
--spec to_routing_pb(blockchain_ledger_routing_v1:routing()) -> validator_pb:routing_pb().
+-spec to_routing_pb(validator_ledger_routing_v1:routing()) -> validator_pb:routing_pb().
 to_routing_pb(Route) ->
     PubKeyAddresses = blockchain_ledger_routing_v1:addresses(Route),
     Addresses = address_data(PubKeyAddresses),
@@ -210,11 +210,14 @@ has_addr_public_ip({_, _Addr}) ->
     {error, no_public_ip}.
 
 format_ip(IP) ->
-    [GrpcOpts] = application:get_env(grpcbox, servers, #{}),
+    {ok, [GrpcOpts]} = application:get_env(grpcbox, servers),
     #{listen_opts := #{port := Port}, transport_opts := #{ssl := SSL}} = GrpcOpts,
+    lager:debug("ip: ~p, ssl: ~p, port: ~p", [IP, SSL, Port]),
     format_ip(IP, SSL, Port).
 
 format_ip(IP, true, Port) ->
-    <<"https://", IP/binary, ":", Port>>;
+    list_to_binary(
+        uri_string:normalize(#{scheme => "https", port => Port, host => IP, path => ""})
+    );
 format_ip(IP, false, Port) ->
-    <<"http://", IP/binary, ":", Port>>.
+    list_to_binary(uri_string:normalize(#{scheme => "http", port => Port, host => IP, path => ""})).

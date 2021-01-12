@@ -16,6 +16,8 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
+-include("../src/grpc/autogen/server/validator_pb.hrl").
+
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
 %%--------------------------------------------------------------------
@@ -427,8 +429,16 @@ assert_route(Route, ExpectedRoute) ->
         blockchain_ledger_routing_v1:subnets(ExpectedRoute),
         maps:get(subnets, Route)
     ),
-    ?assertEqual(
-
-        maps:get(addresses, Route)
+    %% validate the addresses
+    ExpectedRouterPubKeyAddresses = blockchain_ledger_routing_v1:addresses(ExpectedRoute),
+    Addresses = maps:get(addresses, Route),
+    lists:foreach(
+        fun(Address) -> validate_address(ExpectedRouterPubKeyAddresses, Address) end,
+        Addresses
     ).
 
+validate_address(ExpectedRouterPubKeyAddresses, #{pub_key := PubKey, uri := URI}) ->
+    ?assert(lists:member(PubKey, ExpectedRouterPubKeyAddresses)),
+    #{host := _IP, port := Port, scheme := Scheme} = uri_string:parse(URI),
+    ?assert(is_integer(Port)),
+    ?assert((Scheme =:= <<"http">> orelse Scheme =:= <<"https">>)).
