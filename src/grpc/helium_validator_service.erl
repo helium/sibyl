@@ -185,6 +185,7 @@ address_data([PubKeyAddress | Rest], Hosts) ->
             address_data(Rest, [Address | Hosts]);
         {error, _Reason} ->
             lager:warning("no public ip for router address ~p. Reason ~p", [PubKeyAddress, _Reason]),
+
             address_data(Rest, Hosts)
     end.
 
@@ -197,10 +198,25 @@ check_for_public_ip(PubKeyBin) ->
         {ok, PeerInfo} ->
             ClearedListenAddrs = libp2p_peer:cleared_listen_addrs(PeerInfo),
             %% sort listen addrs, ensure the public ip is at the head
-            [H | _] = libp2p_transport:sort_addrs2(SwarmTID, ClearedListenAddrs),
+            [H | _] = libp2p_transport:sort_addrs_with_keys(SwarmTID, ClearedListenAddrs),
             has_addr_public_ip(H);
         {error, not_found} ->
-            {error, peer_not_found}
+            %% we dont have this peer in our peerbook, check if we have an alias for it
+            check_for_alias(SwarmTID, PubKeyBin)
+    end.
+
+check_for_alias(SwarmTID, PubKeyBin) ->
+    MAddr = libp2p_crypto:pubkey_bin_to_p2p(PubKeyBin),
+    Aliases = application:get_env(libp2p, node_aliases, []),
+    case lists:keyfind(MAddr, 1, Aliases) of
+        false ->
+            {error, peer_not_found};
+        {MAddr, AliasAddr} ->
+            {ok, _, {_Transport, _}} =
+                libp2p_transport:for_addr(SwarmTID, AliasAddr),
+            %% hmm ignore transport for now, assume tcp TODO: revisit
+            {IPTuple, _, _, _} = libp2p_transport_tcp:tcp_addr(AliasAddr),
+            format_ip(list_to_binary(inet:ntoa(IPTuple)))
     end.
 
 has_addr_public_ip({1, Addr}) ->
