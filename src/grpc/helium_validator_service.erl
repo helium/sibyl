@@ -15,6 +15,7 @@
     routing/2
 ]).
 
+-spec init(grpcbox_stream:t()) -> grpcbox_stream:t().
 init(StreamState) ->
     lager:debug("handler init, stream state ~p", [StreamState]),
     NewStreamState = grpcbox_stream:stream_handler_state(
@@ -25,11 +26,19 @@ init(StreamState) ->
     ),
     NewStreamState.
 
+-spec routing(validator_pb:routing_request_pb(), grpcbox_stream:t()) ->
+    {continue, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 routing(#routing_request_pb{height = ClientHeight} = Msg, StreamState) ->
     lager:debug("RPC routing called with height ~p", [ClientHeight]),
     #handler_state{initialized = Initialized} = grpcbox_stream:stream_handler_state(StreamState),
     routing(Initialized, sibyl_mgr:blockchain(), Msg, StreamState).
 
+-spec routing(
+    boolean(),
+    blockchain:blockchain(),
+    validator_pb:routing_request_pb(),
+    grpcbox_stream:t()
+) -> {continue, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 routing(_Initialized, undefined = _Chain, #routing_request_pb{} = _Msg, _StreamState) ->
     % if chain not up we have no way to return routing data so just return a 14/503
     lager:debug("chain not ready, returning error response"),
@@ -58,6 +67,7 @@ routing(true = _Initialized, _Chain, #routing_request_pb{} = _Msg, StreamState) 
     lager:debug("ignoring subsequent msg from client ~p", [_Msg]),
     {continue, StreamState}.
 
+-spec handle_info(sibyl_mgr:event() | any(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info(
     {event, EventTopic, Updates} = _Msg,
     StreamState
@@ -75,7 +85,7 @@ handle_info(
 %% ------------------------------------------------------------------
 %% Internal functions
 %% ------------------------------------------------------------------
--spec maybe_send_inital_all_routes_msg(validator_pb:routing_request(), grpc:stream()) ->
+-spec maybe_send_inital_all_routes_msg(validator_pb:routing_request(), grpcbox_stream:t()) ->
     grpc:stream().
 maybe_send_inital_all_routes_msg(ClientHeight, StreamState) ->
     %% get the height field from the request msg and only return
@@ -112,7 +122,8 @@ maybe_send_inital_all_routes_msg(ClientHeight, StreamState) ->
             end
     end.
 
--spec handle_routing_updates({reference(), atom(), binary()}, grpc:stream()) -> grpc:stream().
+-spec handle_routing_updates([{reference(), atom(), binary()}], grpcbox_stream:t()) ->
+    grpcbox_stream:t().
 handle_routing_updates(
     Updates,
     StreamState
@@ -155,6 +166,8 @@ encode_response(_Action, Routes, Height, SigFun) ->
 -spec to_routing_pb(validator_ledger_routing_v1:routing()) -> validator_pb:routing_pb().
 to_routing_pb(Route) ->
     PubKeyAddresses = blockchain_ledger_routing_v1:addresses(Route),
+    %% using the pub keys, attempt to determine public IP for each peer
+    %% and return in address record
     Addresses = address_data(PubKeyAddresses),
     #routing_pb{
         oui = blockchain_ledger_routing_v1:oui(Route),
@@ -172,9 +185,11 @@ is_data_modified(ClientLastHeight, LastModifiedHeight) when
 is_data_modified(_ClientLastHeight, _LastModifiedHeight) ->
     true.
 
+-spec address_data([libp2p_crypto:pubkey_bin()]) -> [#address_pb{}].
 address_data(Addresses) ->
     address_data(Addresses, []).
 
+-spec address_data([libp2p_crypto:pubkey_bin()], [#address_pb{}]) -> [#address_pb{}].
 address_data([], Hosts) ->
     Hosts;
 address_data([PubKeyAddress | Rest], Hosts) ->
@@ -189,7 +204,7 @@ address_data([PubKeyAddress | Rest], Hosts) ->
             address_data(Rest, Hosts)
     end.
 
-%% TODO: is there a better way to do this ?
+-spec check_for_public_ip(libp2p_crypto:pubkey_bin()) -> {ok, binary()} | {error, atom()}.
 check_for_public_ip(PubKeyBin) ->
     lager:debug("getting IP for peer ~p", [PubKeyBin]),
     SwarmTID = blockchain_swarm:tid(),
@@ -205,6 +220,7 @@ check_for_public_ip(PubKeyBin) ->
             check_for_alias(SwarmTID, PubKeyBin)
     end.
 
+-spec check_for_alias(atom(), libp2p_crypto:pubkey_bin()) -> binary() | {error, atom()}.
 check_for_alias(SwarmTID, PubKeyBin) ->
     MAddr = libp2p_crypto:pubkey_bin_to_p2p(PubKeyBin),
     Aliases = application:get_env(libp2p, node_aliases, []),
@@ -219,18 +235,21 @@ check_for_alias(SwarmTID, PubKeyBin) ->
             format_ip(list_to_binary(inet:ntoa(IPTuple)))
     end.
 
+-spec has_addr_public_ip({non_neg_integer(), string()}) -> {ok, binary()} | {error, atom()}.
 has_addr_public_ip({1, Addr}) ->
     [_, _, IP, _, _Port] = re:split(Addr, "/"),
     {ok, IP};
 has_addr_public_ip({_, _Addr}) ->
     {error, no_public_ip}.
 
+-spec format_ip(binary()) -> binary().
 format_ip(IP) ->
     {ok, [GrpcOpts]} = application:get_env(grpcbox, servers),
     #{listen_opts := #{port := Port}, transport_opts := #{ssl := SSL}} = GrpcOpts,
     lager:debug("ip: ~p, ssl: ~p, port: ~p", [IP, SSL, Port]),
     format_ip(IP, SSL, Port).
 
+-spec format_ip(binary(), boolean(), non_neg_integer()) -> binary().
 format_ip(IP, true, Port) ->
     list_to_binary(
         uri_string:normalize(#{scheme => "https", port => Port, host => IP, path => ""})

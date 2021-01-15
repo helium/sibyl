@@ -9,11 +9,11 @@
 -define(SIGFUN, sigfun).
 -define(SERVER, ?MODULE).
 
--type event() :: binary().
+-type event_type() :: binary().
+-type event_types() :: [event_type()].
+-type event() :: {event, binary(), binary()}.
 
--type events() :: [event()].
-
--export_type([event/0, events/0]).
+-export_type([event_type/0, event_types/0, event/0]).
 
 -record(state, {
     tid :: ets:tab(),
@@ -49,11 +49,11 @@
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
--spec update_last_modified(event(), non_neg_integer()) -> true.
+-spec update_last_modified(event_type(), non_neg_integer()) -> true.
 update_last_modified(Event, Height) ->
     ets:insert(?TID, {Event, Height}).
 
--spec get_last_modified(event()) -> non_neg_integer().
+-spec get_last_modified(event_type()) -> non_neg_integer().
 get_last_modified(Event) ->
     try ets:lookup_element(?TID, Event, 2) of
         X -> X
@@ -146,7 +146,10 @@ add_commit_hooks() ->
     %% add any required commit hooks to the ledger
     %% so as we can get updates for those CFs we are interested in
     RoutingFun = fun(RouteUpdate) ->
-        erlbus:pub(?EVENT_ROUTING_UPDATE, {event, ?EVENT_ROUTING_UPDATE, RouteUpdate})
+        erlbus:pub(
+            ?EVENT_ROUTING_UPDATE,
+            sibyl_utils:make_event(?EVENT_ROUTING_UPDATE, RouteUpdate)
+        )
     end,
     Ref = blockchain_worker:add_commit_hook(routing, RoutingFun),
     {ok, [Ref]}.

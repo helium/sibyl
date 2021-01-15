@@ -15,7 +15,8 @@ MAKE="make"
 endif
 
 compile: | $(grpc_services_directory)
-	$(REBAR) format && $(REBAR) compile
+	$(REBAR) compile
+	$(REBAR) format
 
 shell:
 	$(REBAR) shell
