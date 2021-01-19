@@ -50,7 +50,7 @@ routing(
     StreamState
 ) ->
     %% not previously initialized, this must be the first msg from the client
-    %% we will have some setup to do
+    %% we will have some setup to do including subscribing to our required events
     lager:debug("handling first msg from client ~p", [_Msg]),
     ok = erlbus:sub(self(), ?EVENT_ROUTING_UPDATE),
     NewStreamState = maybe_send_inital_all_routes_msg(ClientHeight, StreamState),
@@ -69,11 +69,11 @@ routing(true = _Initialized, _Chain, #routing_request_pb{} = _Msg, StreamState) 
 
 -spec handle_info(sibyl_mgr:event() | any(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info(
-    {event, EventTopic, Updates} = _Msg,
+    {event, _EventTopic, _Update} = Event,
     StreamState
-) when EventTopic =:= ?EVENT_ROUTING_UPDATE ->
-    lager:debug("received event ~p", [_Msg]),
-    NewStreamState = handle_routing_updates(Updates, StreamState),
+) ->
+    lager:debug("received event ~p", [Event]),
+    NewStreamState = handle_event(Event, StreamState),
     NewStreamState;
 handle_info(
     _Msg,
@@ -85,6 +85,23 @@ handle_info(
 %% ------------------------------------------------------------------
 %% Internal functions
 %% ------------------------------------------------------------------
+
+-spec handle_event(sibyl_mgr:event(), grpcbox_stream:t()) -> grpcbox_stream:t().
+handle_event(
+    {event, ?EVENT_ROUTING_UPDATE, Routes},
+    StreamState
+) ->
+    Ledger = blockchain:ledger(sibyl_mgr:blockchain()),
+    {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
+    %% get the sigfun which will be used to sign event payloads sent to the remote peer
+    SigFun = sibyl_mgr:sigfun(),
+    ClientUpdatePB = encode_routing_update_response(Routes, Height, SigFun),
+    lager:debug("sending event to client:  ~p", [
+        ClientUpdatePB
+    ]),
+    NewStreamState = grpcbox_stream:send(false, ClientUpdatePB, StreamState),
+    NewStreamState.
+
 -spec maybe_send_inital_all_routes_msg(validator_pb:routing_request(), grpcbox_stream:t()) ->
     grpc:stream().
 maybe_send_inital_all_routes_msg(ClientHeight, StreamState) ->
@@ -109,8 +126,7 @@ maybe_send_inital_all_routes_msg(ClientHeight, StreamState) ->
             {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
             case blockchain_ledger_v1:get_routes(Ledger) of
                 {ok, Routes} ->
-                    RoutesPB = encode_response(
-                        all,
+                    RoutesPB = encode_routing_update_response(
                         Routes,
                         CurHeight,
                         sibyl_mgr:sigfun()
@@ -122,46 +138,19 @@ maybe_send_inital_all_routes_msg(ClientHeight, StreamState) ->
             end
     end.
 
--spec handle_routing_updates([{reference(), atom(), binary()}], grpcbox_stream:t()) ->
-    grpcbox_stream:t().
-handle_routing_updates(
-    Updates,
-    StreamState
-) ->
-    Ledger = blockchain:ledger(sibyl_mgr:blockchain()),
-    {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
-    %% get the sigfun which will be used to sign event payloads sent to the client
-    SigFun = sibyl_mgr:sigfun(),
-    NewStreamState =
-        lists:foldl(
-            fun(Update, AccStream) ->
-                {_Ref, Action, _Something, RoutePB} = Update,
-                Route = blockchain_ledger_routing_v1:deserialize(RoutePB),
-                RouteUpdatePB = encode_response(Action, [Route], Height, SigFun),
-                lager:debug("sending event to client:  ~p", [
-                    RouteUpdatePB
-                ]),
-                grpcbox_stream:send(false, RouteUpdatePB, AccStream)
-            end,
-            StreamState,
-            Updates
-        ),
-    NewStreamState.
-
--spec encode_response(
-    atom(),
+-spec encode_routing_update_response(
     blockchain_ledger_routing_v1:routing(),
     non_neg_integer(),
     function()
 ) -> validator_pb:routing_response_pb().
-encode_response(_Action, Routes, Height, SigFun) ->
-    RouteUpdatePB = [to_routing_pb(R) || R <- Routes],
-    Resp = #routing_response_pb{
-        routings = RouteUpdatePB,
+encode_routing_update_response(Routes, Height, SigFun) ->
+    RoutePB = [to_routing_pb(R) || R <- Routes],
+    Update = #routing_response_pb{
+        routings = RoutePB,
         height = Height
     },
-    EncodedRoutingInfoBin = validator_pb:encode_msg(Resp, routing_response_pb),
-    Resp#routing_response_pb{signature = SigFun(EncodedRoutingInfoBin)}.
+    EncodedUpdateBin = validator_pb:encode_msg(Update, routing_response_pb),
+    Update#routing_response_pb{signature = SigFun(EncodedUpdateBin)}.
 
 -spec to_routing_pb(validator_ledger_routing_v1:routing()) -> validator_pb:routing_pb().
 to_routing_pb(Route) ->

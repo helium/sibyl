@@ -2,10 +2,15 @@
 
 %% API
 -export([
+    make_event/1,
     make_event/2,
     ensure/2,
     ensure/3
 ]).
+
+-spec make_event(binary()) -> sibyl_mgr:event().
+make_event(EventType) ->
+    {event, EventType}.
 
 -spec make_event(binary(), binary()) -> sibyl_mgr:event().
 make_event(EventType, EventPayload) ->

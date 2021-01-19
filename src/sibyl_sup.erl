@@ -50,9 +50,12 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 init([]) ->
+    %% create the sibyl_mgr ets table under this supervisor and set ourselves as the heir
+    %% we call `ets:give_away' every time we start_link sibyl_mgr
+    SibylMgrOpts = [{ets, sibyl_mgr:make_ets_table()}],
     {ok,
         {?FLAGS, [
-            ?WORKER(sibyl_mgr, [])
+            ?WORKER(sibyl_mgr, [SibylMgrOpts])
         ]}}.
 
 %% internal functions
