@@ -39,7 +39,7 @@
 }).
 
 -define(FLAGS, #{
-    strategy => rest_for_one,
+    strategy => one_for_one,
     intensity => 1,
     period => 5
 }).
@@ -50,27 +50,12 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 init([]) ->
-    {ok, _} = application:ensure_all_started(lager),
-    %% set route and client ref header config for chatterbox
-    %% if a new http2 handler is added, be sure to add its route/path and
-    %% associated module to the fun below
-    RouterHttp2HandlerRoutingFun = fun
-        (<<"/v1/routes">>) -> {ok, http2_handler_routes_v1};
-        (<<"/v1/events/route_updates", _Topic/binary>>) -> {ok, http2_handler_sse_route_updates_v1};
-        (UnknownRequestType) -> {error, {handler_not_found, UnknownRequestType}}
-    end,
-    ok = application:set_env(
-        chatterbox,
-        stream_callback_opts,
-        [
-            {http2_handler_routing_fun, RouterHttp2HandlerRoutingFun},
-            {http2_client_ref_header_name, <<"x-gateway-id">>}
-        ]
-    ),
+    %% create the sibyl_mgr ets table under this supervisor and set ourselves as the heir
+    %% we call `ets:give_away' every time we start_link sibyl_mgr
+    SibylMgrOpts = [{ets, sibyl_mgr:make_ets_table()}],
     {ok,
         {?FLAGS, [
-            ?SUP(chatterbox_sup, []),
-            ?WORKER(sibyl_mgr, [])
+            ?WORKER(sibyl_mgr, [SibylMgrOpts])
         ]}}.
 
 %% internal functions

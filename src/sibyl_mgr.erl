@@ -6,14 +6,15 @@
 
 -define(TID, val_mgr).
 -define(CHAIN, blockchain).
+-define(HEIGHT, height).
 -define(SIGFUN, sigfun).
 -define(SERVER, ?MODULE).
 
--type event() :: binary().
+-type event_type() :: binary().
+-type event_types() :: [event_type()].
+-type event() :: {event, binary(), any()} | {event, binary()}.
 
--type events() :: [event()].
-
--export_type([event/0, events/0]).
+-export_type([event_type/0, event_types/0, event/0]).
 
 -record(state, {
     tid :: ets:tab(),
@@ -35,35 +36,58 @@
 %% API exports
 %% ------------------------------------------------------------------
 -export([
-    start_link/0,
+    start_link/1,
+    make_ets_table/0,
     update_last_modified/2,
     get_last_modified/1,
     blockchain/0,
+    height/0,
     sigfun/0
 ]).
 
 %% ------------------------------------------------------------------
 %% API functions
 %% ------------------------------------------------------------------
--spec start_link() -> {ok, Pid :: pid()} | ignore | {error, Reason :: term()}.
-start_link() ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+-spec start_link([any()]) -> {ok, Pid :: pid()} | ignore | {error, Reason :: term()}.
+start_link(Args) ->
+    case gen_server:start_link({local, ?MODULE}, ?MODULE, Args, []) of
+        {ok, Pid} ->
+            %% if we have an ETS table reference, give ownership to the new process
+            %% we likely are the `heir', so we'll get it back if this process dies
+            case proplists:get_value(ets, Args) of
+                undefined ->
+                    ok;
+                Tab ->
+                    true = ets:give_away(Tab, Pid, undefined),
+                    {ok, Pid}
+            end;
+        Other ->
+            Other
+    end.
 
--spec update_last_modified(event(), non_neg_integer()) -> true.
+-spec update_last_modified(event_type(), non_neg_integer()) -> true.
 update_last_modified(Event, Height) ->
     ets:insert(?TID, {Event, Height}).
 
--spec get_last_modified(event()) -> non_neg_integer().
+-spec get_last_modified(event_type()) -> non_neg_integer().
 get_last_modified(Event) ->
     try ets:lookup_element(?TID, Event, 2) of
         X -> X
     catch
-        _:_ -> 1
+        _:_ -> undefined
     end.
 
 -spec blockchain() -> blockchain:blockchain() | undefined.
 blockchain() ->
     try ets:lookup_element(?TID, ?CHAIN, 2) of
+        X -> X
+    catch
+        _:_ -> undefined
+    end.
+
+-spec height() -> non_neg_integer() | undefined.
+height() ->
+    try ets:lookup_element(?TID, ?HEIGHT, 2) of
         X -> X
     catch
         _:_ -> undefined
@@ -77,13 +101,31 @@ sigfun() ->
         _:_ -> undefined
     end.
 
+make_ets_table() ->
+    ets:new(
+        ?TID,
+        [
+            public,
+            ordered_set,
+            named_table,
+            {read_concurrency, true},
+            {heir, self(), undefined}
+        ]
+    ).
+
 %% ------------------------------------------------------------------
 %% gen_server functions
 %% ------------------------------------------------------------------
-init(_Args) ->
+init(Args) ->
     process_flag(trap_exit, true),
-    lager:info("init with args ~p", [_Args]),
-    TID = ets:new(?TID, [public, ordered_set, named_table, {read_concurrency, true}]),
+    lager:info("init with args ~p", [Args]),
+    TID =
+        case proplists:get_value(ets, Args) of
+            undefined ->
+                make_ets_table();
+            Tab ->
+                Tab
+        end,
     _ = erlang:send_after(500, self(), setup),
     {ok, #state{tid = TID}}.
 
@@ -98,16 +140,20 @@ handle_cast(_Msg, State) ->
 handle_info(setup, State) ->
     try blockchain_worker:blockchain() of
         undefined ->
-            lager:debug("chain not ready, will try again"),
+            lager:debug("chain not ready, will try again in a bit"),
             erlang:send_after(2000, self(), setup),
             {noreply, State};
         Chain ->
             lager:debug("chain ready, saving chain and sigfun to cache and adding commit hooks"),
+            Ledger = blockchain:ledger(Chain),
             ok = blockchain_event:add_handler(self()),
             {ok, _, SigFun, _} = blockchain_swarm:keys(),
+            {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
             ets:insert(?TID, {?CHAIN, Chain}),
             ets:insert(?TID, {?SIGFUN, SigFun}),
+            ets:insert(?TID, {?HEIGHT, CurHeight}),
             {ok, Refs} = add_commit_hooks(),
+            ok = subscribe_to_events(),
             {noreply, State#state{commit_hook_refs = Refs}}
     catch
         _:_ ->
@@ -119,8 +165,32 @@ handle_info({blockchain_event, {new_chain, NC}}, State = #state{commit_hook_refs
     ets:insert(?TID, {?CHAIN, NC}),
     {ok, NewRefs} = add_commit_hooks(),
     {noreply, State#state{commit_hook_refs = NewRefs}};
+handle_info(
+    {event, EventTopic} = _Msg,
+    State
+) when EventTopic == ?EVENT_ROUTING_UPDATES_END ->
+    %% ledger routes must have been updated
+    %% send the updated routes to all connected peers
+    Chain = ?MODULE:blockchain(),
+    Ledger = blockchain:ledger(Chain),
+    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
+    {ok, Routes} = blockchain_ledger_v1:get_routes(Ledger),
+    erlbus:pub(
+        ?EVENT_ROUTING_UPDATE,
+        sibyl_utils:make_event(?EVENT_ROUTING_UPDATE, Routes)
+    ),
+    %% update cache with the height at which the routes have been updated
+    true = ?MODULE:update_last_modified(?EVENT_ROUTING_UPDATE, CurHeight),
+    lager:debug("updated last modified height for event ~p with height ~p", [
+        ?EVENT_ROUTING_UPDATE,
+        CurHeight
+    ]),
+    {noreply, State};
+handle_info({'ETS-TRANSFER', _TID, _FromPid, _Data}, State) ->
+    lager:debug("rcvd ets table transfer for tid ~p", [_TID]),
+    {noreply, State};
 handle_info(_Msg, State) ->
-    lager:warning("rcvd unknown info msg: ~p", [_Msg]),
+    lager:debug("rcvd unknown info msg: ~p", [_Msg]),
     {noreply, State}.
 
 terminate(_Reason, _State = #state{commit_hook_refs = Refs}) ->
@@ -133,9 +203,21 @@ terminate(_Reason, _State = #state{commit_hook_refs = Refs}) ->
 -spec add_commit_hooks() -> {ok, [reference() | atom()]}.
 add_commit_hooks() ->
     %% add any required commit hooks to the ledger
-    %% so as we can get updates for those CFs we are interested in
-    RoutingFun = fun(RouteUpdate) ->
-        erlbus:pub(?EVENT_ROUTING_UPDATE, {event, ?EVENT_ROUTING_UPDATE, RouteUpdate})
+    %% we arent interested in receiving incremental/partial updates of route data
+    %% we do want to be receive events of when there have been route updates
+    %% and those updates for the current block have *all* been applied
+    RouteUpdateIncrementalFun = fun(_Update) -> noop end,
+    RouteUpdatesEndFun = fun() ->
+        erlbus:pub(
+            ?EVENT_ROUTING_UPDATES_END,
+            sibyl_utils:make_event(?EVENT_ROUTING_UPDATES_END)
+        )
     end,
-    Ref = blockchain_worker:add_commit_hook(routing, RoutingFun),
+    Ref = blockchain_worker:add_commit_hook(routing, RouteUpdateIncrementalFun, RouteUpdatesEndFun),
     {ok, [Ref]}.
+
+-spec subscribe_to_events() -> ok.
+subscribe_to_events() ->
+    %% subscribe to events the mgr is interested in
+    [erlbus:sub(self(), E) || E <- [?EVENT_ROUTING_UPDATES_END]],
+    ok.

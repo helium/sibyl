@@ -6,28 +6,32 @@ PKG_NAME_VER=${SHORTSHA}
 
 OS_NAME=$(shell uname -s)
 
+grpc_services_directory=src/grpc/autogen
+
 ifeq (${OS_NAME},FreeBSD)
 make="gmake"
 else
 MAKE="make"
 endif
 
-compile:
-	$(REBAR) format && $(REBAR) compile
+compile: | $(grpc_services_directory)
+	$(REBAR) compile
+	$(REBAR) format
 
 shell:
 	$(REBAR) shell
 
 clean:
+	rm -rf $(grpc_services_directory)
 	$(REBAR) clean
 
 cover:
 	$(REBAR) cover
 
-test:
-	$(REBAR) as test do eunit,ct
+test: | $(grpc_services_directory)
+	$(REBAR) as test do ct --suite test/grpc_SUITE
 
-ci:
+ci: | $(grpc_services_directory)
 	$(REBAR) do dialyzer,xref && $(REBAR) as test do eunit,ct,cover
 	$(REBAR) covertool generate
 	codecov --required -f _build/test/covertool/sibyl.covertool.xml
@@ -37,3 +41,12 @@ typecheck:
 
 doc:
 	$(REBAR) edoc
+
+grpc:
+	REBAR_CONFIG="config/grpc_server_gen.config" $(REBAR) grpc gen
+	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
+
+$(grpc_services_directory):
+	@echo "grpc service directory $(directory) does not exist, will generate services"
+	$(REBAR) get-deps
+	$(MAKE) grpc

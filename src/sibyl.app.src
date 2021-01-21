@@ -8,8 +8,8 @@
     stdlib,
     lager,
     erlbus,
-    chatterbox,
-    lib_http2_handler
+    grpcbox,
+    grpc_client
    ]},
   {included_applications, []},
   {env,[]},
