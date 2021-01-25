@@ -9,6 +9,7 @@
 -define(HEIGHT, height).
 -define(SIGFUN, sigfun).
 -define(SERVER, ?MODULE).
+-define(ROUTING_CF_NAME, routing).
 
 -type event_type() :: binary().
 -type event_types() :: [event_type()].
@@ -175,9 +176,11 @@ handle_info(
     Ledger = blockchain:ledger(Chain),
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
     {ok, Routes} = blockchain_ledger_v1:get_routes(Ledger),
+    SigFun = ?MODULE:sigfun(),
+    ClientUpdatePB = sibyl_utils:encode_routing_update_response(Routes, CurHeight, SigFun),
     erlbus:pub(
         ?EVENT_ROUTING_UPDATE,
-        sibyl_utils:make_event(?EVENT_ROUTING_UPDATE, Routes)
+        sibyl_utils:make_event(?EVENT_ROUTING_UPDATE, ClientUpdatePB)
     ),
     %% update cache with the height at which the routes have been updated
     true = ?MODULE:update_last_modified(?EVENT_ROUTING_UPDATE, CurHeight),
@@ -203,17 +206,26 @@ terminate(_Reason, _State = #state{commit_hook_refs = Refs}) ->
 -spec add_commit_hooks() -> {ok, [reference() | atom()]}.
 add_commit_hooks() ->
     %% add any required commit hooks to the ledger
+
+    %% Routing Related Hooks
     %% we arent interested in receiving incremental/partial updates of route data
+    RouteUpdateIncrementalFun = fun(_Update) -> noop end,
     %% we do want to be receive events of when there have been route updates
     %% and those updates for the current block have *all* been applied
-    RouteUpdateIncrementalFun = fun(_Update) -> noop end,
-    RouteUpdatesEndFun = fun() ->
-        erlbus:pub(
-            ?EVENT_ROUTING_UPDATES_END,
-            sibyl_utils:make_event(?EVENT_ROUTING_UPDATES_END)
-        )
+    RouteUpdatesEndFun = fun
+        (?ROUTING_CF_NAME = _CFName) ->
+            erlbus:pub(
+                ?EVENT_ROUTING_UPDATES_END,
+                sibyl_utils:make_event(?EVENT_ROUTING_UPDATES_END)
+            );
+        (_CFName) ->
+            noop
     end,
-    Ref = blockchain_worker:add_commit_hook(routing, RouteUpdateIncrementalFun, RouteUpdatesEndFun),
+    Ref = blockchain_worker:add_commit_hook(
+        ?ROUTING_CF_NAME,
+        RouteUpdateIncrementalFun,
+        RouteUpdatesEndFun
+    ),
     {ok, [Ref]}.
 
 -spec subscribe_to_events() -> ok.
