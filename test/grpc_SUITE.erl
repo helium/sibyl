@@ -16,6 +16,7 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
+%%-include("../include/sibyl.hrl").
 -include("../src/grpc/autogen/server/validator_pb.hrl").
 
 %%--------------------------------------------------------------------
@@ -45,14 +46,12 @@ init_per_testcase(TestCase, Config) ->
     lager:set_loglevel(lager_console_backend, debug),
     lager:set_loglevel({lager_file_backend, LogDir}, debug),
 
-    application:ensure_all_started(gun),
-    application:ensure_all_started(throttle),
     application:ensure_all_started(erlbus),
     application:ensure_all_started(grpcbox),
 
     Config1 = test_utils:init_per_testcase(TestCase, Config0),
 
-    sibyl_sup:start_link(),
+    {ok, SibylSupPid} = sibyl_sup:start_link(),
     %% give time for the mgr to be initialised with chain
     test_utils:wait_until(fun() -> sibyl_mgr:blockchain() =/= undefined end),
 
@@ -95,6 +94,9 @@ init_per_testcase(TestCase, Config) ->
     ),
     ?assertEqual({ok, Routing0}, blockchain_ledger_v1:find_routing(OUI1, Ledger)),
 
+    %% wait until the ledger hook for the OUI above has fired and been processed by sibyl mgr
+    ok = test_utils:wait_until(fun() -> 2 == sibyl_mgr:get_last_modified(?EVENT_ROUTING_UPDATE) end),
+
     %% setup the grpc connection and open a stream
     {ok, Connection} = grpc_client:connect(tcp, "localhost", 10001),
     %% routes_v1 = service, stream_route_updates = RPC call, routes_v1 = decoder, ie the PB generated encode/decode file
@@ -106,6 +108,7 @@ init_per_testcase(TestCase, Config) ->
     ),
 
     [
+        {sibyl_sup, SibylSupPid},
         {payer, Payer},
         {payer_sig_fun, SigFun},
         {chain, Chain},
@@ -121,9 +124,11 @@ init_per_testcase(TestCase, Config) ->
 %% TEST CASE TEARDOWN
 %%--------------------------------------------------------------------
 end_per_testcase(TestCase, Config) ->
-    meck:unload(blockchain_txn_oui_v1),
-    test_utils:end_per_testcase(TestCase, Config),
-    catch exit(whereis(sibyl_sup)).
+    SibylSup = ?config(sibyl_sup, Config),
+    application:stop(erlbus),
+    application:stop(grpcbox),
+    true = erlang:exit(SibylSup, normal),
+    test_utils:end_per_testcase(TestCase, Config).
 
 %%--------------------------------------------------------------------
 %% TEST CASES
@@ -136,11 +141,11 @@ routing_updates_with_initial_msg_test(Config) ->
     Ledger = ?config(ledger, Config),
     Payer = ?config(payer, Config),
     SigFun = ?config(payer_sig_fun, Config),
-    _Connection = ?config(grpc_connection, Config),
+    Connection = ?config(grpc_connection, Config),
     Stream = ?config(grpc_stream, Config),
     OUI1 = ?config(oui1, Config),
 
-    %% send the initial mss from the client with its safe height value
+    %% send the initial msg from the client with its safe height value
     grpc_client:send(Stream, #{height => 1}),
 
     %% we expect to receive a response containing all the added routes from the init_per_testcase step
@@ -218,6 +223,9 @@ routing_updates_with_initial_msg_test(Config) ->
     ct:pal("Route Update: ~p", [Routes2]),
     assert_route_update(Routes2, ExpRoutes2),
 
+    grpc_client:stop_stream(Stream),
+    grpc_client:stop_connection(Connection),
+
     ok.
 
 routing_updates_without_initial_msg_test(Config) ->
@@ -227,7 +235,7 @@ routing_updates_without_initial_msg_test(Config) ->
     Ledger = ?config(ledger, Config),
     Payer = ?config(payer, Config),
     SigFun = ?config(payer_sig_fun, Config),
-    _Connection = ?config(grpc_connection, Config),
+    Connection = ?config(grpc_connection, Config),
     Stream = ?config(grpc_stream, Config),
     OUI1 = ?config(oui1, Config),
 
@@ -244,7 +252,7 @@ routing_updates_without_initial_msg_test(Config) ->
 
     %% give a lil time for the handler to spawn on the peer and then confirm we get no msgs from the handler
     %% we will only receive our first data msg after the next route update
-    timer:sleep(2000),
+    timer:sleep(500),
     empty = grpc_client:get(Stream),
 
     %% update the existing route - confirm we get a streamed update of the updated route - should remain a single route
@@ -284,6 +292,9 @@ routing_updates_without_initial_msg_test(Config) ->
     {data, Routes1} = grpc_client:rcv(Stream, 5000),
     ct:pal("Route Update: ~p", [Routes1]),
     assert_route_update(Routes1, ExpRoutes1),
+
+    grpc_client:stop_stream(Stream),
+    grpc_client:stop_connection(Connection),
 
     ok.
 

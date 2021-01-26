@@ -112,14 +112,14 @@ maybe_send_inital_all_routes_msg(ClientHeight, StreamState) ->
     case is_data_modified(ClientHeight, LastModifiedHeight) of
         false ->
             lager:debug(
-                "not sending initial routes msg, data not modified since client height ~p",
-                [ClientHeight]
+                "not sending initial routes msg, data last modified ~p, client height ~p",
+                [LastModifiedHeight, ClientHeight]
             ),
             StreamState;
         true ->
             lager:debug(
-                "sending initial routes msg, data has been modified since client height ~p",
-                [ClientHeight]
+                "sending initial routes msg, data last modified ~p, client height ~p",
+                [LastModifiedHeight, ClientHeight]
             ),
             %% get the route data
             Chain = sibyl_mgr:blockchain(),
