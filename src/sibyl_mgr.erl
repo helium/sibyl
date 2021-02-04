@@ -3,6 +3,7 @@
 -behaviour(gen_server).
 
 -include("../include/sibyl.hrl").
+-include("grpc/autogen/server/validator_state_channels_pb.hrl").
 
 -define(TID, val_mgr).
 -define(CHAIN, blockchain).
@@ -10,6 +11,7 @@
 -define(SIGFUN, sigfun).
 -define(SERVER, ?MODULE).
 -define(ROUTING_CF_NAME, routing).
+-define(STATE_CHANNEL_CF_NAME, state_channel).
 
 -type event_type() :: binary().
 -type event_types() :: [event_type()].
@@ -189,6 +191,27 @@ handle_info(
         CurHeight
     ]),
     {noreply, State};
+%%handle_info(
+%%    {event, EventTopic, UpdatedSC} = _Msg,
+%%    State
+%%) when EventTopic == ?EVENT_STATE_CHANNEL_UPDATE ->
+%%    %% a state channel has been updated
+%%    %% get its ID and republish it to a SC ID specific topic
+%%    %% thus subscribers only receive SC updates of those they are specifically following
+%%    Chain = ?MODULE:blockchain(),
+%%    Ledger = blockchain:ledger(Chain),
+%%    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
+%%    SCID = blockchain_state_channel_v1:id(UpdatedSC),
+%%    Response0 = #validator_sc_follow_resp_v1_pb{
+%%        sc = UpdatedSC
+%%    },
+%%    Response1 = sibyl_utils:encode_validator_resp_v1(Response0, CurHeight, sibyl_mgr:sigfun()),
+%%    SCTopic = sibyl_utils:make_sc_topic(SCID),
+%%    erlbus:pub(
+%%        SCTopic,
+%%        sibyl_utils:make_event(SCTopic, Response1)
+%%    ),
+%%    {noreply, State};
 handle_info({'ETS-TRANSFER', _TID, _FromPid, _Data}, State) ->
     lager:debug("rcvd ets table transfer for tid ~p", [_TID]),
     {noreply, State};
@@ -221,15 +244,37 @@ add_commit_hooks() ->
         (_CFName) ->
             noop
     end,
-    Ref = blockchain_worker:add_commit_hook(
+    RoutingRef = blockchain_worker:add_commit_hook(
         ?ROUTING_CF_NAME,
         RouteUpdateIncrementalFun,
         RouteUpdatesEndFun
     ),
-    {ok, [Ref]}.
+
+    %% State Channel Related Hooks
+    %% we are interested in receiving incremental/partial updates of route data
+
+    SCUpdateIncrementalFun = fun(UpdatedSC) ->
+        SCID = blockchain_state_channel_v1:id(UpdatedSC),
+        SCTopic = sibyl_utils:make_sc_topic(SCID),
+        erlbus:pub(
+            SCTopic,
+            sibyl_utils:make_event(SCTopic, UpdatedSC)
+        )
+    end,
+    %% we do NOT want to be receive events of when there have been state channels updates
+    %% and those updates for the current block have *all* been applied
+    SCUpdatesEndFun = fun(_Update) -> noop end,
+
+    SCRef = blockchain_worker:add_commit_hook(
+        ?STATE_CHANNEL_CF_NAME,
+        SCUpdateIncrementalFun,
+        SCUpdatesEndFun
+    ),
+
+    {ok, [RoutingRef, SCRef]}.
 
 -spec subscribe_to_events() -> ok.
 subscribe_to_events() ->
     %% subscribe to events the mgr is interested in
-    [erlbus:sub(self(), E) || E <- [?EVENT_ROUTING_UPDATES_END]],
+    [erlbus:sub(self(), E) || E <- [?EVENT_ROUTING_UPDATES_END, ?EVENT_STATE_CHANNEL_UPDATE]],
     ok.

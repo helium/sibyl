@@ -1,12 +1,16 @@
 -module(sibyl_utils).
 
+-include("../include/sibyl.hrl").
 -include("grpc/autogen/server/validator_pb.hrl").
+-include("grpc/autogen/server/validator_state_channels_pb.hrl").
 
 %% API
 -export([
     make_event/1,
     make_event/2,
+    make_sc_topic/1,
     encode_routing_update_response/3,
+    encode_validator_resp_v1/3,
 
     ensure/2,
     ensure/3
@@ -19,6 +23,9 @@ make_event(EventType) ->
 -spec make_event(binary(), binary()) -> sibyl_mgr:event().
 make_event(EventType, EventPayload) ->
     {event, EventType, EventPayload}.
+
+make_sc_topic(SCID) ->
+    <<?EVENT_STATE_CHANNEL_UPDATE/binary, SCID/binary>>.
 
 -spec encode_routing_update_response(
     blockchain_ledger_routing_v1:routing(),
@@ -33,6 +40,19 @@ encode_routing_update_response(Routes, Height, SigFun) ->
     },
     EncodedUpdateBin = validator_pb:encode_msg(Update, routing_response_pb),
     Update#routing_response_pb{signature = SigFun(EncodedUpdateBin)}.
+
+-spec encode_validator_resp_v1(
+    any(),
+    non_neg_integer(),
+    function()
+) -> state_channel_validator_pb:validator_resp_v1_pb().
+encode_validator_resp_v1(Msg, Height, SigFun) ->
+    Update = #validator_resp_v1_pb{
+        msg = Msg,
+        height = Height
+    },
+    EncodedUpdateBin = state_channel_validator_pb:encode_msg(Update, validator_resp_v1_pb),
+    Update#validator_resp_v1_pb{signature = SigFun(EncodedUpdateBin)}.
 
 ensure(_, undefined) ->
     undefined;

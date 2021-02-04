@@ -42,7 +42,7 @@ routing(#routing_request_pb{height = ClientHeight} = Msg, StreamState) ->
 routing(_Initialized, undefined = _Chain, #routing_request_pb{} = _Msg, _StreamState) ->
     % if chain not up we have no way to return routing data so just return a 14/503
     lager:debug("chain not ready, returning error response"),
-    {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavavailable">>}};
+    {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 routing(
     false = _Initialized,
     _Chain,
@@ -85,7 +85,6 @@ handle_info(
 %% ------------------------------------------------------------------
 %% Internal functions
 %% ------------------------------------------------------------------
-
 -spec handle_event(sibyl_mgr:event(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_event(
     {event, ?EVENT_ROUTING_UPDATE, EncodedRoutesPB} = _Event,
