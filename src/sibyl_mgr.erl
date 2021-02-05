@@ -11,7 +11,7 @@
 -define(SIGFUN, sigfun).
 -define(SERVER, ?MODULE).
 -define(ROUTING_CF_NAME, routing).
--define(STATE_CHANNEL_CF_NAME, state_channel).
+-define(STATE_CHANNEL_CF_NAME, state_channels).
 
 -type event_type() :: binary().
 -type event_types() :: [event_type()].

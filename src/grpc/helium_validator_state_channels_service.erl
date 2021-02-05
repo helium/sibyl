@@ -53,7 +53,6 @@ follow(#validator_sc_follow_req_v1_pb{sc_id = SCID} = Msg, StreamState) ->
     #handler_state{sc_follows = FollowList} = grpcbox_stream:stream_handler_state(StreamState),
     follow(Chain, lists:member(SCID, FollowList), Msg, StreamState).
 
--spec handle_info(sibyl_mgr:event() | any(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info({blockchain_event, {add_block, BlockHash, _Sync, _Ledger} = _Event}, StreamState) ->
     %% for each add block event, we get the block height and use this to determine
     %% if we need to send any event msgs back to the client relating to close state
@@ -180,8 +179,7 @@ follow(
     ),
     {continue, NewStreamState1};
 follow(_Chain, true = _IsAlreadyFolowing, #validator_sc_follow_req_v1_pb{} = _Msg, StreamState) ->
-    %% we are already following this SC
-    %% ignore and return continue directive
+    %% we are already following this SC - ignore
     lager:debug("ignoring dup follow. Msg ~p", [_Msg]),
     {continue, StreamState}.
 
@@ -194,9 +192,10 @@ handle_event(
     StreamState
 ) ->
     %% if an SC we are following is updated at the ledger side we will receive an event
-    %% with the resulting updated SC
-    %% this only really happens with a close txn is submitted and applied
-    %% as we we use this event to determine when an SC becomes closed
+    %% from the ledger commit hook.  The event payload will be the updated SC
+    %% For SCs, this only really happens when a close txn is submitted
+    %% We we use this event to determine when an SC becomes closed
+    %% and send the corresponding event to the client
     Chain = sibyl_mgr:blockchain(),
     Ledger = blockchain:ledger(Chain),
     SCGrace = sc_grace(Ledger),
