@@ -191,27 +191,6 @@ handle_info(
         CurHeight
     ]),
     {noreply, State};
-%%handle_info(
-%%    {event, EventTopic, UpdatedSC} = _Msg,
-%%    State
-%%) when EventTopic == ?EVENT_STATE_CHANNEL_UPDATE ->
-%%    %% a state channel has been updated
-%%    %% get its ID and republish it to a SC ID specific topic
-%%    %% thus subscribers only receive SC updates of those they are specifically following
-%%    Chain = ?MODULE:blockchain(),
-%%    Ledger = blockchain:ledger(Chain),
-%%    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
-%%    SCID = blockchain_state_channel_v1:id(UpdatedSC),
-%%    Response0 = #validator_sc_follow_resp_v1_pb{
-%%        sc = UpdatedSC
-%%    },
-%%    Response1 = sibyl_utils:encode_validator_resp_v1(Response0, CurHeight, sibyl_mgr:sigfun()),
-%%    SCTopic = sibyl_utils:make_sc_topic(SCID),
-%%    erlbus:pub(
-%%        SCTopic,
-%%        sibyl_utils:make_event(SCTopic, Response1)
-%%    ),
-%%    {noreply, State};
 handle_info({'ETS-TRANSFER', _TID, _FromPid, _Data}, State) ->
     lager:debug("rcvd ets table transfer for tid ~p", [_TID]),
     {noreply, State};
@@ -230,36 +209,46 @@ terminate(_Reason, _State = #state{commit_hook_refs = Refs}) ->
 add_commit_hooks() ->
     %% add any required commit hooks to the ledger
 
-    %% Routing Related Hooks
-    %% we arent interested in receiving incremental/partial updates of route data
-    RouteUpdateIncrementalFun = fun(_Update) -> noop end,
-    %% we do want to be receive events of when there have been route updates
-    %% and those updates for the current block have *all* been applied
-    RouteUpdatesEndFun = fun
-        (?ROUTING_CF_NAME = _CFName) ->
-            erlbus:pub(
-                ?EVENT_ROUTING_UPDATES_END,
-                sibyl_utils:make_event(?EVENT_ROUTING_UPDATES_END)
-            );
-        (_CFName) ->
-            noop
-    end,
-    RoutingRef = blockchain_worker:add_commit_hook(
-        ?ROUTING_CF_NAME,
-        RouteUpdateIncrementalFun,
-        RouteUpdatesEndFun
-    ),
+    %%    %% Routing Related Hooks
+    %%    %% we arent interested in receiving incremental/partial updates of route data
+    %%    RouteUpdateIncrementalFun = fun(_Update) -> noop end,
+    %%    %% we do want to be receive events of when there have been route updates
+    %%    %% and those updates for the current block have *all* been applied
+    %%    RouteUpdatesEndFun = fun
+    %%        (?ROUTING_CF_NAME = _CFName) ->
+    %%            erlbus:pub(
+    %%                ?EVENT_ROUTING_UPDATES_END,
+    %%                sibyl_utils:make_event(?EVENT_ROUTING_UPDATES_END)
+    %%            );
+    %%        (_CFName) ->
+    %%            noop
+    %%    end,
+    %%    RoutingRef = blockchain_worker:add_commit_hook(
+    %%        ?ROUTING_CF_NAME,
+    %%        RouteUpdateIncrementalFun,
+    %%        RouteUpdatesEndFun
+    %%    ),
 
     %% State Channel Related Hooks
     %% we are interested in receiving incremental/partial updates of route data
-
-    SCUpdateIncrementalFun = fun(UpdatedSC) ->
-        SCID = blockchain_state_channel_v1:id(UpdatedSC),
-        SCTopic = sibyl_utils:make_sc_topic(SCID),
-        erlbus:pub(
-            SCTopic,
-            sibyl_utils:make_event(SCTopic, UpdatedSC)
-        )
+    %%[{#Ref<0.4083681274.2554462232.228507>,put,<<0,184,36,122,42,4,100,62,181,233,53,180,18,201,128,205,104,246,212,227,154,135,206,69,226,216,6,43,15,1,172,7,26,182,80,48,253,63,186,181,85,129,181,156,198,235,36,186,127,57,167,144,156,66,9,206,10,166,136,188,191,91,88,49,37>>,<<1,131,104,5,100,0,23,108,101,100,103,101,114,95,115,116,97,116,101,95,99,104,97,110,110,101,108,95,118,49,109,0,0,0,32,182,80,48,253,63,186,181,85,129,181,156,198,235,36,186,127,57,167,144,156,66,9,206,10,166,136,188,191,91,88,49,37,109,0,0,0,33,0,184,36,122,42,4,100,62,181,233,53,180,18,201,128,205,104,246,212,227,154,135,206,69,226,216,6,43,15,1,172,7,26,97,27,97,1>>}]
+    SCUpdateIncrementalFun = fun
+        ([{_CF, put, _Key, Value}]) ->
+            lager:info("*** updated sc: ~p", [Value]),
+            UpdatedSC = blockchain_ledger_state_channel_v1:deserialize(Value),
+            lager:info("*** updated sc: ~p", [UpdatedSC]),
+            SCID = blockchain_ledger_state_channel_v1:id(UpdatedSC),
+            SCTopic = sibyl_utils:make_sc_topic(SCID),
+            erlbus:pub(
+                SCTopic,
+                sibyl_utils:make_event(SCTopic, {put, UpdatedSC})
+            );
+        ({_CF, delete, Key}) ->
+            SCTopic = sibyl_utils:make_sc_topic(Key),
+            erlbus:pub(
+                SCTopic,
+                sibyl_utils:make_event(SCTopic, {delete, Key})
+            )
     end,
     %% we do NOT want to be receive events of when there have been state channels updates
     %% and those updates for the current block have *all* been applied
@@ -271,7 +260,9 @@ add_commit_hooks() ->
         SCUpdatesEndFun
     ),
 
-    {ok, [RoutingRef, SCRef]}.
+    %%    lager:info("*** added commit hooks ~p ~p", [RoutingRef, SCRef]),
+    %%    {ok, [RoutingRef, SCRef]}.
+    {ok, [SCRef]}.
 
 -spec subscribe_to_events() -> ok.
 subscribe_to_events() ->

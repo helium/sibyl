@@ -95,13 +95,13 @@ is_valid(undefined = _Chain, _Ctx, #validator_sc_is_valid_req_v1_pb{} = _Msg) ->
     lager:debug("chain not ready, returning error response for msg ", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 is_valid(Chain, Ctx, #validator_sc_is_valid_req_v1_pb{sc = SC} = _Message) ->
-    lager:debug("executing RPC is_valid with msg ~p", [_Message]),
+    lager:info("executing RPC is_valid with msg ~p", [_Message]),
     SCID = blockchain_state_channel_v1:id(SC),
     {ok, CurHeight} = height(),
     {IsValid, Msg} = is_valid_sc(SC, Chain),
     Response0 = #validator_sc_is_valid_resp_v1_pb{
         valid = IsValid,
-        reason = Msg,
+        reason = sibyl_utils:ensure(binary, Msg),
         sc_id = SCID
     },
     Response1 = sibyl_utils:encode_validator_resp_v1(Response0, CurHeight, sibyl_mgr:sigfun()),
@@ -151,10 +151,10 @@ follow(
     %% get the SC from the ledger
     Ledger = blockchain:ledger(Chain),
     SCGrace = sc_grace(Ledger),
-    {ok, SC} = get_state_channel(SCID, SCOwner, Ledger),
+    {ok, SC} = get_ledger_state_channel(SCID, SCOwner, Ledger),
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
-    SCExpireAtHeight = blockchain_state_channel_v1:expire_at_block(SC),
-    SCState = blockchain_state_channel_v1:state(SC),
+    SCExpireAtHeight = blockchain_ledger_state_channel_v1:expire_at_block(SC),
+    SCState = blockchain_ledger_state_channel_v1:state(SC),
     #handler_state{sc_follows = SCFollows} = grpcbox_stream:stream_handler_state(
         StreamState
     ),
@@ -188,7 +188,7 @@ follow(_Chain, true = _IsAlreadyFolowing, #validator_sc_follow_req_v1_pb{} = _Ms
 %% ------------------------------------------------------------------
 -spec handle_event(sibyl_mgr:event(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_event(
-    {event, _EventTopic, #blockchain_state_channel_v1_pb{} = UpdatedSC} = _Event,
+    {event, _EventTopic, {delete, SCID}} = _Event,
     StreamState
 ) ->
     %% if an SC we are following is updated at the ledger side we will receive an event
@@ -196,20 +196,24 @@ handle_event(
     %% For SCs, this only really happens when a close txn is submitted
     %% We we use this event to determine when an SC becomes closed
     %% and send the corresponding event to the client
-    Chain = sibyl_mgr:blockchain(),
-    Ledger = blockchain:ledger(Chain),
-    SCGrace = sc_grace(Ledger),
-    SCID = blockchain_state_channel_v1:id(UpdatedSC),
-    SCExpireAtHeight = blockchain_state_channel_v1:expire_at_block(UpdatedSC),
-    SCState = blockchain_state_channel_v1:state(UpdatedSC),
+
     {ok, CurHeight} = height(),
-    NewStreamState = process_sc_close_events(
-        {SCID, SCExpireAtHeight, SCState},
-        CurHeight,
-        SCGrace,
+    #handler_state{sc_closes_sent = SCClosesSent} = grpcbox_stream:stream_handler_state(
         StreamState
     ),
-    NewStreamState;
+    {NewStreamState, NewClosesSent} = maybe_send_follow_msg(
+        lists:member(SCID, SCClosesSent),
+        SCID,
+        {?SC_CLOSED, SCClosesSent},
+        CurHeight,
+        StreamState
+    ),
+    grpcbox_stream:stream_handler_state(
+        NewStreamState,
+        #handler_state{
+            sc_closes_sent = NewClosesSent
+        }
+    );
 handle_event(
     {event, _EventType, _Payload} = _Event,
     StreamState
@@ -233,29 +237,6 @@ process_sc_close_events(BlockTime, SCGrace, StreamState) ->
         SCFollows
     ).
 
-process_sc_close_events(
-    {SCID, _SCExpireAtHeight, _SCState = <<"closed">>},
-    BlockTime,
-    _SCGrace,
-    StreamState
-) ->
-    %% send closed event if not previously sent
-    #handler_state{sc_closes_sent = SCClosesSent} = grpcbox_stream:stream_handler_state(
-        StreamState
-    ),
-    {NewStreamState, NewClosesSent} = maybe_send_follow_msg(
-        lists:member(SCID, SCClosesSent),
-        SCID,
-        {?SC_CLOSED, SCClosesSent},
-        BlockTime,
-        StreamState
-    ),
-    grpcbox_stream:stream_handler_state(
-        NewStreamState,
-        #handler_state{
-            sc_closes_sent = NewClosesSent
-        }
-    );
 process_sc_close_events({SCID, SCExpireAtHeight, _SCState}, BlockTime, _SCGrace, StreamState) when
     BlockTime == SCExpireAtHeight
 ->
@@ -327,13 +308,7 @@ is_valid_sc(SC, Chain) ->
         {error, Reason} = _E ->
             {false, Reason};
         ok ->
-            case quick_validate(SC) of
-                {error, Reason} = _E ->
-                    lager:error("invalid sc, reason: ~p", [Reason]),
-                    {false, Reason};
-                ok ->
-                    {true, ok}
-            end
+            {true, <<>>}
     end.
 
 -spec is_active_sc(
@@ -345,24 +320,24 @@ is_active_sc(_, _, undefined) ->
     {error, no_chain};
 is_active_sc(SCID, SCOwner, Chain) ->
     Ledger = blockchain:ledger(Chain),
-    case get_state_channel(SCID, SCOwner, Ledger) of
+    case get_ledger_state_channel(SCID, SCOwner, Ledger) of
         {ok, _SC} -> ok;
         _ -> {error, inactive_sc}
     end.
 
--spec quick_validate(blockchain_state_channel_v1:state_channel()) -> ok | {error, any()}.
-quick_validate(SC) ->
-    BaseSC = SC#blockchain_state_channel_v1_pb{signature = <<>>},
-    EncodedSC = blockchain_state_channel_v1:encode(BaseSC),
-    Signature = blockchain_state_channel_v1:signature(SC),
-    Owner = blockchain_state_channel_v1:owner(SC),
-    PubKey = libp2p_crypto:bin_to_pubkey(Owner),
-    case libp2p_crypto:verify(EncodedSC, Signature, PubKey) of
-        false -> {error, bad_signature};
-        true -> ok
-    end.
+%%-spec quick_validate(blockchain_state_channel_v1:state_channel()) -> ok | {error, any()}.
+%%quick_validate(SC) ->
+%%    BaseSC = SC#blockchain_state_channel_v1_pb{signature = <<>>},
+%%    EncodedSC = blockchain_state_channel_v1:encode(BaseSC),
+%%    Signature = blockchain_state_channel_v1:signature(SC),
+%%    Owner = blockchain_state_channel_v1:owner(SC),
+%%    PubKey = libp2p_crypto:bin_to_pubkey(Owner),
+%%    case libp2p_crypto:verify(EncodedSC, Signature, PubKey) of
+%%        false -> {error, bad_signature};
+%%        true -> ok
+%%    end.
 
-get_state_channel(SCID, Owner, Ledger) ->
+get_ledger_state_channel(SCID, Owner, Ledger) ->
     case blockchain_ledger_v1:find_state_channel(SCID, Owner, Ledger) of
         {ok, SC} -> {ok, SC};
         _ -> {error, inactive_sc}

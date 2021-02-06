@@ -45,13 +45,14 @@ encode_routing_update_response(Routes, Height, SigFun) ->
     any(),
     non_neg_integer(),
     function()
-) -> state_channel_validator_pb:validator_resp_v1_pb().
+) -> validator_state_channels_pb:validator_resp_v1_pb().
 encode_validator_resp_v1(Msg, Height, SigFun) ->
     Update = #validator_resp_v1_pb{
-        msg = Msg,
-        height = Height
+        height = Height,
+        msg = {is_valid_resp, Msg},
+        signature = <<>>
     },
-    EncodedUpdateBin = state_channel_validator_pb:encode_msg(Update, validator_resp_v1_pb),
+    EncodedUpdateBin = validator_state_channels_pb:encode_msg(Update, validator_resp_v1_pb),
     Update#validator_resp_v1_pb{signature = SigFun(EncodedUpdateBin)}.
 
 ensure(_, undefined) ->
