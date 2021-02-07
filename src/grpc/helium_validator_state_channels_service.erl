@@ -107,7 +107,11 @@ is_valid(Chain, Ctx, #validator_sc_is_valid_req_v1_pb{sc = SC} = _Message) ->
         reason = sibyl_utils:ensure(binary, Msg),
         sc_id = SCID
     },
-    Response1 = sibyl_utils:encode_validator_resp_v1(Response0, CurHeight, sibyl_mgr:sigfun()),
+    Response1 = sibyl_utils:encode_validator_resp_v1(
+        {is_valid_resp, Response0},
+        CurHeight,
+        sibyl_mgr:sigfun()
+    ),
     {ok, Response1, Ctx}.
 
 -spec close(
@@ -150,7 +154,7 @@ follow(
     StreamState
 ) ->
     %% we are not already following this SC, so lets start things rolling
-    lager:info("executing RPC follow with msg ~p", [_Msg]),
+    lager:info("executing RPC follow for sc id ~p and owner ~p", [SCID, SCOwner]),
     %% get the SC from the ledger
     Ledger = blockchain:ledger(Chain),
     SCGrace = sc_grace(Ledger),
@@ -161,8 +165,13 @@ follow(
     %% we want to know when any changes to this SC are applied to the ledger
     %% such as it being closed, so subscribe to events for this SC
     %% these are published by the ledger commit hooks ( setup via siby_mgr )
-    ok = erlbus:sub(self(), sibyl_utils:make_sc_topic(SCID)),
 
+    %% the ledger SCs are keyed on combo of sc id and the owner
+    %% the ledger commit hooks will publish using this key
+    %% so we must subscribe using same key
+
+    %% TODO: need to normalise this to plain old sc id key, client wont want the owner here
+    ok = erlbus:sub(self(), sibyl_utils:make_sc_topic(<<SCOwner/binary, SCID/binary>>)),
     %% process the SC in case we need to send a msg to client informing of state
     NewStreamState0 = process_sc_close_events(
         {SCID, SCExpireAtHeight},
@@ -172,12 +181,13 @@ follow(
     ),
 
     %% get and update the list of SCs we are already following with this SCID
-    #handler_state{sc_follows = SCFollows} = grpcbox_stream:stream_handler_state(
-        StreamState
-    ),
+    #handler_state{sc_follows = SCFollows} =
+        HandlerState = grpcbox_stream:stream_handler_state(
+            StreamState
+        ),
     NewStreamState1 = grpcbox_stream:stream_handler_state(
         NewStreamState0,
-        #handler_state{
+        HandlerState#handler_state{
             sc_follows = maps:put(SCID, {SCID, SCExpireAtHeight}, SCFollows)
         }
     ),
@@ -195,6 +205,7 @@ handle_event(
     {event, _EventTopic, {delete, SCID}} = _Event,
     StreamState
 ) ->
+    lager:info("got delete SC for ID ~p", [SCID]),
     %% if an SC we are following is updated at the ledger side we will receive an event
     %% from the ledger commit hook.  The event payload will be the updated SC
     %% For SCs, this only really happens when a close txn is submitted
@@ -202,9 +213,10 @@ handle_event(
     %% and send the corresponding event to the client
 
     {ok, CurHeight} = height(),
-    #handler_state{sc_closes_sent = SCClosesSent} = grpcbox_stream:stream_handler_state(
-        StreamState
-    ),
+    #handler_state{sc_closes_sent = SCClosesSent} =
+        HandlerState = grpcbox_stream:stream_handler_state(
+            StreamState
+        ),
     {NewStreamState, NewClosesSent} = maybe_send_follow_msg(
         lists:member(SCID, SCClosesSent),
         SCID,
@@ -214,7 +226,7 @@ handle_event(
     ),
     grpcbox_stream:stream_handler_state(
         NewStreamState,
-        #handler_state{
+        HandlerState#handler_state{
             sc_closes_sent = NewClosesSent
         }
     );
@@ -233,6 +245,7 @@ process_sc_close_events(BlockTime, SCGrace, StreamState) ->
     #handler_state{sc_follows = SCFollows} = grpcbox_stream:stream_handler_state(
         StreamState
     ),
+    lager:info("checking close events for follow list ~p", [SCFollows]),
     maps:fold(
         fun(_K, V, AccStreamState) ->
             process_sc_close_events(V, BlockTime, SCGrace, AccStreamState)
@@ -246,9 +259,10 @@ process_sc_close_events({SCID, SCExpireAtHeight}, BlockTime, _SCGrace, StreamSta
 ->
     lager:info("process_sc_close_events: block time same as SCExpireHeight", []),
     %% send closeable event if not previously sent
-    #handler_state{sc_closables_sent = SCClosablesSent} = grpcbox_stream:stream_handler_state(
-        StreamState
-    ),
+    #handler_state{sc_closables_sent = SCClosablesSent} =
+        HandlerState = grpcbox_stream:stream_handler_state(
+            StreamState
+        ),
     {NewStreamState, NewClosablesSent} = maybe_send_follow_msg(
         lists:member(SCID, SCClosablesSent),
         SCID,
@@ -258,7 +272,7 @@ process_sc_close_events({SCID, SCExpireAtHeight}, BlockTime, _SCGrace, StreamSta
     ),
     grpcbox_stream:stream_handler_state(
         NewStreamState,
-        #handler_state{
+        HandlerState#handler_state{
             sc_closables_sent = NewClosablesSent
         }
     );
@@ -268,9 +282,10 @@ process_sc_close_events({SCID, SCExpireAtHeight}, BlockTime, SCGrace, StreamStat
 ->
     lager:info("process_sc_close_events: block time within SC expire-at grace time", []),
     %% send closing event if not previously sent
-    #handler_state{sc_closings_sent = SCClosingsSent} = grpcbox_stream:stream_handler_state(
-        StreamState
-    ),
+    #handler_state{sc_closings_sent = SCClosingsSent} =
+        HandlerState = grpcbox_stream:stream_handler_state(
+            StreamState
+        ),
     {NewStreamState, NewClosingsSent} = maybe_send_follow_msg(
         lists:member(SCID, SCClosingsSent),
         SCID,
@@ -280,7 +295,7 @@ process_sc_close_events({SCID, SCExpireAtHeight}, BlockTime, SCGrace, StreamStat
     ),
     grpcbox_stream:stream_handler_state(
         NewStreamState,
-        #handler_state{
+        HandlerState#handler_state{
             sc_closings_sent = NewClosingsSent
         }
     );
@@ -300,7 +315,11 @@ maybe_send_follow_msg(false = _Send, SCID, {SCState, SendList}, Height, StreamSt
         sc_id = SCID
     },
 
-    Msg1 = sibyl_utils:encode_validator_resp_v1(Msg0, Height, sibyl_mgr:sigfun()),
+    Msg1 = sibyl_utils:encode_validator_resp_v1(
+        {follow_streamed_msg, Msg0},
+        Height,
+        sibyl_mgr:sigfun()
+    ),
     NewStreamState = grpcbox_stream:send(false, Msg1, StreamState),
     {NewStreamState, [SCID | SendList]}.
 

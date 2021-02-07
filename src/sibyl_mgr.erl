@@ -243,7 +243,9 @@ add_commit_hooks() ->
                 SCTopic,
                 sibyl_utils:make_event(SCTopic, {put, UpdatedSC})
             );
-        ({_CF, delete, Key}) ->
+        ([{_CF, delete, Key}]) ->
+            %% note: the key here is a combo of <<owner, sc_id>>
+            lager:info("*** delete sc: ~p", [Key]),
             SCTopic = sibyl_utils:make_sc_topic(Key),
             erlbus:pub(
                 SCTopic,

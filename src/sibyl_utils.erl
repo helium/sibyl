@@ -49,7 +49,7 @@ encode_routing_update_response(Routes, Height, SigFun) ->
 encode_validator_resp_v1(Msg, Height, SigFun) ->
     Update = #validator_resp_v1_pb{
         height = Height,
-        msg = {is_valid_resp, Msg},
+        msg = Msg,
         signature = <<>>
     },
     EncodedUpdateBin = validator_state_channels_pb:encode_msg(Update, validator_resp_v1_pb),
