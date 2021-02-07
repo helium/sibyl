@@ -7,9 +7,9 @@
 -include_lib("helium_proto/include/blockchain_state_channel_v1_pb.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
 
--define(SC_CLOSED, <<"closed">>).
--define(SC_CLOSING, <<"closing">>).
--define(SC_CLOSABLE, <<"closable">>).
+-define(SC_CLOSED, closed).
+-define(SC_CLOSING, closing).
+-define(SC_CLOSABLE, closable).
 
 -record(handler_state, {
     sc_follows = #{} :: map(),
@@ -50,8 +50,8 @@ close(Ctx, #validator_sc_close_req_v1_pb{} = Message) ->
 
 follow(#validator_sc_follow_req_v1_pb{sc_id = SCID} = Msg, StreamState) ->
     Chain = sibyl_mgr:blockchain(),
-    #handler_state{sc_follows = FollowList} = grpcbox_stream:stream_handler_state(StreamState),
-    follow(Chain, lists:member(SCID, FollowList), Msg, StreamState).
+    #handler_state{sc_follows = SCFollows} = grpcbox_stream:stream_handler_state(StreamState),
+    follow(Chain, maps:is_key(SCID, SCFollows), Msg, StreamState).
 
 handle_info({blockchain_event, {add_block, BlockHash, _Sync, _Ledger} = _Event}, StreamState) ->
     %% for each add block event, we get the block height and use this to determine
@@ -59,14 +59,17 @@ handle_info({blockchain_event, {add_block, BlockHash, _Sync, _Ledger} = _Event},
     Chain = sibyl_mgr:blockchain(),
     Ledger = blockchain:ledger(Chain),
     SCGrace = sc_grace(Ledger),
-    case blockchain:get_block(BlockHash, Chain) of
-        {ok, Block} ->
-            BlockHeight = blockchain_block:height(Block),
-            process_sc_close_events(BlockHeight, SCGrace, StreamState);
-        _ ->
-            %% hmm do nothing...
-            noop
-    end;
+    NewStreamState =
+        case blockchain:get_block(BlockHash, Chain) of
+            {ok, Block} ->
+                BlockHeight = blockchain_block:height(Block),
+                lager:info("processing add_block event for height ~p", [BlockHeight]),
+                process_sc_close_events(BlockHeight, SCGrace, StreamState);
+            _ ->
+                %% hmm do nothing...
+                StreamState
+        end,
+    NewStreamState;
 handle_info(
     {event, _EventTopic, _Payload} = Event,
     StreamState
@@ -138,7 +141,7 @@ follow(
     _StreamState
 ) ->
     % if chain not up we have no way to return state channel data so just return a 14/503
-    lager:debug("chain not ready, returning error response for msg ", [_Msg]),
+    lager:info("chain not ready, returning error response for msg ", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 follow(
     Chain,
@@ -147,40 +150,41 @@ follow(
     StreamState
 ) ->
     %% we are not already following this SC, so lets start things rolling
-    lager:debug("RPC follow called with msg ~p", [_Msg]),
+    lager:info("executing RPC follow with msg ~p", [_Msg]),
     %% get the SC from the ledger
     Ledger = blockchain:ledger(Chain),
     SCGrace = sc_grace(Ledger),
     {ok, SC} = get_ledger_state_channel(SCID, SCOwner, Ledger),
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
     SCExpireAtHeight = blockchain_ledger_state_channel_v1:expire_at_block(SC),
-    SCState = blockchain_ledger_state_channel_v1:state(SC),
-    #handler_state{sc_follows = SCFollows} = grpcbox_stream:stream_handler_state(
-        StreamState
-    ),
 
     %% we want to know when any changes to this SC are applied to the ledger
-    %% such as the SC closing, to subscribe to events for this SC
+    %% such as it being closed, so subscribe to events for this SC
     %% these are published by the ledger commit hooks ( setup via siby_mgr )
     ok = erlbus:sub(self(), sibyl_utils:make_sc_topic(SCID)),
 
     %% process the SC in case we need to send a msg to client informing of state
     NewStreamState0 = process_sc_close_events(
-        {SCID, SCExpireAtHeight, SCState},
+        {SCID, SCExpireAtHeight},
         CurHeight,
         SCGrace,
+        StreamState
+    ),
+
+    %% get and update the list of SCs we are already following with this SCID
+    #handler_state{sc_follows = SCFollows} = grpcbox_stream:stream_handler_state(
         StreamState
     ),
     NewStreamState1 = grpcbox_stream:stream_handler_state(
         NewStreamState0,
         #handler_state{
-            sc_follows = maps:put(SCID, {SCID, SCExpireAtHeight, SCState}, SCFollows)
+            sc_follows = maps:put(SCID, {SCID, SCExpireAtHeight}, SCFollows)
         }
     ),
     {continue, NewStreamState1};
 follow(_Chain, true = _IsAlreadyFolowing, #validator_sc_follow_req_v1_pb{} = _Msg, StreamState) ->
     %% we are already following this SC - ignore
-    lager:debug("ignoring dup follow. Msg ~p", [_Msg]),
+    lager:info("ignoring dup follow. Msg ~p", [_Msg]),
     {continue, StreamState}.
 
 %% ------------------------------------------------------------------
@@ -230,16 +234,17 @@ process_sc_close_events(BlockTime, SCGrace, StreamState) ->
         StreamState
     ),
     maps:fold(
-        fun(I) ->
-            process_sc_close_events(I, BlockTime, SCGrace, StreamState)
+        fun(_K, V, AccStreamState) ->
+            process_sc_close_events(V, BlockTime, SCGrace, AccStreamState)
         end,
         StreamState,
         SCFollows
     ).
 
-process_sc_close_events({SCID, SCExpireAtHeight, _SCState}, BlockTime, _SCGrace, StreamState) when
+process_sc_close_events({SCID, SCExpireAtHeight}, BlockTime, _SCGrace, StreamState) when
     BlockTime == SCExpireAtHeight
 ->
+    lager:info("process_sc_close_events: block time same as SCExpireHeight", []),
     %% send closeable event if not previously sent
     #handler_state{sc_closables_sent = SCClosablesSent} = grpcbox_stream:stream_handler_state(
         StreamState
@@ -257,10 +262,11 @@ process_sc_close_events({SCID, SCExpireAtHeight, _SCState}, BlockTime, _SCGrace,
             sc_closables_sent = NewClosablesSent
         }
     );
-process_sc_close_events({SCID, SCExpireAtHeight, _SCState}, BlockTime, SCGrace, StreamState) when
+process_sc_close_events({SCID, SCExpireAtHeight}, BlockTime, SCGrace, StreamState) when
     BlockTime >= SCExpireAtHeight + (SCGrace div 3) andalso
         BlockTime =< SCExpireAtHeight + SCGrace
 ->
+    lager:info("process_sc_close_events: block time within SC expire-at grace time", []),
     %% send closing event if not previously sent
     #handler_state{sc_closings_sent = SCClosingsSent} = grpcbox_stream:stream_handler_state(
         StreamState
@@ -277,15 +283,23 @@ process_sc_close_events({SCID, SCExpireAtHeight, _SCState}, BlockTime, SCGrace, 
         #handler_state{
             sc_closings_sent = NewClosingsSent
         }
-    ).
+    );
+process_sc_close_events({_SCID, _SCExpireAtHeight}, _BlockTime, _SCGrace, StreamState) ->
+    lager:info("process_sc_close_events: nothing to do for SC ~p at blocktime ~p", [
+        _SCID,
+        _BlockTime
+    ]),
+    StreamState.
 
 maybe_send_follow_msg(true = _Send, _SCID, {_SCState, SendList}, _Height, StreamState) ->
     {StreamState, SendList};
 maybe_send_follow_msg(false = _Send, SCID, {SCState, SendList}, Height, StreamState) ->
+    lager:info("sending SC event ~p for SCID ~p", [SCState, SCID]),
     Msg0 = #validator_sc_follow_streamed_msg_v1_pb{
         close_state = SCState,
         sc_id = SCID
     },
+
     Msg1 = sibyl_utils:encode_validator_resp_v1(Msg0, Height, sibyl_mgr:sigfun()),
     NewStreamState = grpcbox_stream:send(false, Msg1, StreamState),
     {NewStreamState, [SCID | SendList]}.
