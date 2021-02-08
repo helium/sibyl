@@ -231,22 +231,13 @@ add_commit_hooks() ->
 
     %% State Channel Related Hooks
     %% we are interested in receiving incremental/partial updates of route data
-    %%[{#Ref<0.4083681274.2554462232.228507>,put,<<0,184,36,122,42,4,100,62,181,233,53,180,18,201,128,205,104,246,212,227,154,135,206,69,226,216,6,43,15,1,172,7,26,182,80,48,253,63,186,181,85,129,181,156,198,235,36,186,127,57,167,144,156,66,9,206,10,166,136,188,191,91,88,49,37>>,<<1,131,104,5,100,0,23,108,101,100,103,101,114,95,115,116,97,116,101,95,99,104,97,110,110,101,108,95,118,49,109,0,0,0,32,182,80,48,253,63,186,181,85,129,181,156,198,235,36,186,127,57,167,144,156,66,9,206,10,166,136,188,191,91,88,49,37,109,0,0,0,33,0,184,36,122,42,4,100,62,181,233,53,180,18,201,128,205,104,246,212,227,154,135,206,69,226,216,6,43,15,1,172,7,26,97,27,97,1>>}]
     SCUpdateIncrementalFun = fun
-        ([{_CF, put, _Key, Value}]) ->
-            lager:info("*** updated sc: ~p", [Value]),
-            UpdatedSC = blockchain_ledger_state_channel_v1:deserialize(Value),
-            lager:info("*** updated sc: ~p", [UpdatedSC]),
-            SCID = blockchain_ledger_state_channel_v1:id(UpdatedSC),
-            SCTopic = sibyl_utils:make_sc_topic(SCID),
-            erlbus:pub(
-                SCTopic,
-                sibyl_utils:make_event(SCTopic, {put, UpdatedSC})
-            );
+        ([{_CF, put, _Key, _Value}]) ->
+            noop;
         ([{_CF, delete, Key}]) ->
-            %% note: the key here is a combo of <<owner, sc_id>>
-            lager:info("*** delete sc: ~p", [Key]),
+            %% note: the key will be a combo of <<owner, sc_id>>
             SCTopic = sibyl_utils:make_sc_topic(Key),
+            lager:info("publishing SC delete event for key ~p and topic ~p", [Key, SCTopic]),
             erlbus:pub(
                 SCTopic,
                 sibyl_utils:make_event(SCTopic, {delete, Key})

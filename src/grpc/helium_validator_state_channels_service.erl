@@ -48,10 +48,11 @@ close(Ctx, #validator_sc_close_req_v1_pb{} = Message) ->
     Chain = sibyl_mgr:blockchain(),
     close(Chain, Ctx, Message).
 
-follow(#validator_sc_follow_req_v1_pb{sc_id = SCID} = Msg, StreamState) ->
+follow(#validator_sc_follow_req_v1_pb{sc_id = SCID, owner = SCOwner} = Msg, StreamState) ->
     Chain = sibyl_mgr:blockchain(),
     #handler_state{sc_follows = SCFollows} = grpcbox_stream:stream_handler_state(StreamState),
-    follow(Chain, maps:is_key(SCID, SCFollows), Msg, StreamState).
+    Key = blockchain_ledger_v1:state_channel_key(SCID, SCOwner),
+    follow(Chain, maps:is_key(Key, SCFollows), Msg, StreamState).
 
 handle_info({blockchain_event, {add_block, BlockHash, _Sync, _Ledger} = _Event}, StreamState) ->
     %% for each add block event, we get the block height and use this to determine
@@ -169,9 +170,12 @@ follow(
     %% the ledger SCs are keyed on combo of sc id and the owner
     %% the ledger commit hooks will publish using this key
     %% so we must subscribe using same key
-
+    %% as we also have the standalone SCID key in state we can utilise that were needed
     %% TODO: need to normalise this to plain old sc id key, client wont want the owner here
-    ok = erlbus:sub(self(), sibyl_utils:make_sc_topic(<<SCOwner/binary, SCID/binary>>)),
+    Key = blockchain_ledger_v1:state_channel_key(SCID, SCOwner),
+    SCTopic = sibyl_utils:make_sc_topic(Key),
+    lager:info("subscribing to SC events for key ~p and topic ~p", [Key, SCTopic]),
+    ok = erlbus:sub(self(), SCTopic),
     %% process the SC in case we need to send a msg to client informing of state
     NewStreamState0 = process_sc_close_events(
         {SCID, SCExpireAtHeight},
@@ -188,7 +192,7 @@ follow(
     NewStreamState1 = grpcbox_stream:stream_handler_state(
         NewStreamState0,
         HandlerState#handler_state{
-            sc_follows = maps:put(SCID, {SCID, SCExpireAtHeight}, SCFollows)
+            sc_follows = maps:put(Key, {SCID, SCExpireAtHeight}, SCFollows)
         }
     ),
     {continue, NewStreamState1};
@@ -202,34 +206,42 @@ follow(_Chain, true = _IsAlreadyFolowing, #validator_sc_follow_req_v1_pb{} = _Ms
 %% ------------------------------------------------------------------
 -spec handle_event(sibyl_mgr:event(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_event(
-    {event, _EventTopic, {delete, SCID}} = _Event,
+    {event, _EventTopic, {delete, LedgerSCID}} = _Event,
     StreamState
 ) ->
-    lager:info("got delete SC for ID ~p", [SCID]),
-    %% if an SC we are following is updated at the ledger side we will receive an event
-    %% from the ledger commit hook.  The event payload will be the updated SC
-    %% For SCs, this only really happens when a close txn is submitted
-    %% We we use this event to determine when an SC becomes closed
-    %% and send the corresponding event to the client
-
-    {ok, CurHeight} = height(),
-    #handler_state{sc_closes_sent = SCClosesSent} =
+    lager:info("handling delete state channel for ledger key ~p", [LedgerSCID]),
+    #handler_state{sc_closes_sent = SCClosesSent, sc_follows = SCFollows} =
         HandlerState = grpcbox_stream:stream_handler_state(
             StreamState
         ),
-    {NewStreamState, NewClosesSent} = maybe_send_follow_msg(
-        lists:member(SCID, SCClosesSent),
-        SCID,
-        {?SC_CLOSED, SCClosesSent},
-        CurHeight,
-        StreamState
-    ),
-    grpcbox_stream:stream_handler_state(
-        NewStreamState,
-        HandlerState#handler_state{
-            sc_closes_sent = NewClosesSent
-        }
-    );
+
+    %% if an SC we are following is closed at the ledger side we will receive an delete event
+    %% from the ledger commit hook.
+    %% the payload will be the ledger key of the SC ( combo of <<owner, sc_id>> )
+    %% We we use this event to determine when an SC becomes closed
+    %% and send the corresponding closed event to the client
+
+    %% use the ledger key to get the standalone SC ID from our follow list
+    case maps:get(LedgerSCID, SCFollows) of
+        {SCID, _SCExpireAtHeight} ->
+            {ok, CurHeight} = height(),
+            {NewStreamState, NewClosesSent} = maybe_send_follow_msg(
+                lists:member(SCID, SCClosesSent),
+                SCID,
+                {?SC_CLOSED, SCClosesSent},
+                CurHeight,
+                StreamState
+            ),
+            grpcbox_stream:stream_handler_state(
+                NewStreamState,
+                HandlerState#handler_state{
+                    sc_closes_sent = NewClosesSent
+                }
+            );
+        _ ->
+            %% if we dont have a matching entry in the follow list do nothing
+            StreamState
+    end;
 handle_event(
     {event, _EventType, _Payload} = _Event,
     StreamState
