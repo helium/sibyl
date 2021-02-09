@@ -163,10 +163,9 @@ follow(
     %% get the SC from the ledger
     Ledger = blockchain:ledger(Chain),
     SCGrace = sc_grace(Ledger),
-    {ok, SC} = get_ledger_state_channel(SCID, SCOwner, Ledger),
+    {ok, SCLedgerMod, SC} = get_ledger_state_channel(SCID, SCOwner, Ledger),
+    SCExpireAtHeight = SCLedgerMod:expire_at_block(SC),
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
-    SCExpireAtHeight = blockchain_ledger_state_channel_v1:expire_at_block(SC),
-
     %% we want to know when any changes to this SC are applied to the ledger
     %% such as it being closed, so subscribe to events for this SC
     %% the events are published by the ledger commit hooks ( setup via siby_mgr )
@@ -181,12 +180,11 @@ follow(
     ok = erlbus:sub(self(), SCTopic),
     %% process the SC in case we need to send a msg to client informing of state
     NewStreamState0 = process_sc_close_events(
-        {SCID, SCExpireAtHeight},
+        {SCLedgerMod, SCID, SCExpireAtHeight},
         CurHeight,
         SCGrace,
         StreamState
     ),
-
     %% add this SC to our follow list
     #handler_state{sc_follows = SCFollows} =
         HandlerState = grpcbox_stream:stream_handler_state(
@@ -195,7 +193,7 @@ follow(
     NewStreamState1 = grpcbox_stream:stream_handler_state(
         NewStreamState0,
         HandlerState#handler_state{
-            sc_follows = maps:put(Key, {SCID, SCExpireAtHeight}, SCFollows)
+            sc_follows = maps:put(Key, {SCLedgerMod, SCID, SCExpireAtHeight}, SCFollows)
         }
     ),
     {continue, NewStreamState1};
@@ -226,7 +224,7 @@ handle_event(
 
     %% use the ledger key to get the standalone SC ID from our follow list
     case maps:get(LedgerSCID, SCFollows) of
-        {SCID, _SCExpireAtHeight} ->
+        {_SCMod, SCID, _SCExpireAtHeight} ->
             {ok, CurHeight} = height(),
             {NewStreamState, NewClosesSent} = maybe_send_follow_msg(
                 lists:member(SCID, SCClosesSent),
@@ -269,7 +267,7 @@ process_sc_close_events(BlockTime, SCGrace, StreamState) ->
         SCFollows
     ).
 
-process_sc_close_events({SCID, SCExpireAtHeight}, BlockTime, _SCGrace, StreamState) when
+process_sc_close_events({_SCMod, SCID, SCExpireAtHeight}, BlockTime, _SCGrace, StreamState) when
     BlockTime == SCExpireAtHeight
 ->
     lager:info("process_sc_close_events: block time same as SCExpireHeight", []),
@@ -291,7 +289,7 @@ process_sc_close_events({SCID, SCExpireAtHeight}, BlockTime, _SCGrace, StreamSta
             sc_closables_sent = NewClosablesSent
         }
     );
-process_sc_close_events({SCID, SCExpireAtHeight}, BlockTime, SCGrace, StreamState) when
+process_sc_close_events({_SCMod, SCID, SCExpireAtHeight}, BlockTime, SCGrace, StreamState) when
     BlockTime >= SCExpireAtHeight + (SCGrace div 3) andalso
         BlockTime =< SCExpireAtHeight + SCGrace
 ->
@@ -314,7 +312,7 @@ process_sc_close_events({SCID, SCExpireAtHeight}, BlockTime, SCGrace, StreamStat
             sc_closings_sent = NewClosingsSent
         }
     );
-process_sc_close_events({_SCID, _SCExpireAtHeight}, _BlockTime, _SCGrace, StreamState) ->
+process_sc_close_events({_SCMod, _SCID, _SCExpireAtHeight}, _BlockTime, _SCGrace, StreamState) ->
     lager:info("process_sc_close_events: nothing to do for SC ~p at blocktime ~p", [
         _SCID,
         _BlockTime
@@ -369,13 +367,13 @@ is_active_sc(_, _, undefined) ->
 is_active_sc(SCID, SCOwner, Chain) ->
     Ledger = blockchain:ledger(Chain),
     case get_ledger_state_channel(SCID, SCOwner, Ledger) of
-        {ok, _SC} -> ok;
+        {ok, _Mod, _SC} -> ok;
         _ -> {error, inactive_sc}
     end.
 
 get_ledger_state_channel(SCID, Owner, Ledger) ->
-    case blockchain_ledger_v1:find_state_channel(SCID, Owner, Ledger) of
-        {ok, SC} -> {ok, SC};
+    case blockchain_ledger_v1:find_state_channel_with_mod(SCID, Owner, Ledger) of
+        {ok, Mod, SC} -> {ok, Mod, SC};
         _ -> {error, inactive_sc}
     end.
 
