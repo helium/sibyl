@@ -124,13 +124,17 @@ close(undefined = _Chain, _Ctx, #validator_sc_close_req_v1_pb{} = _Msg) ->
     lager:debug("chain not ready, returning error response for msg ", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 close(_Chain, Ctx, #validator_sc_close_req_v1_pb{close_txn = CloseTxn} = _Message) ->
-    lager:debug("executing RPC close with msg ~p", [_Message]),
+    lager:info("executing RPC close with msg ~p", [_Message]),
     SC = blockchain_txn_state_channel_close_v1:state_channel(CloseTxn),
     SCID = blockchain_state_channel_v1:id(SC),
     ok = blockchain_worker:submit_txn(CloseTxn),
     {ok, CurHeight} = height(),
     Response0 = #validator_sc_close_resp_v1_pb{sc_id = SCID, response = <<"ok">>},
-    Response1 = sibyl_utils:encode_validator_resp_v1(Response0, CurHeight, sibyl_mgr:sigfun()),
+    Response1 = sibyl_utils:encode_validator_resp_v1(
+        {close_resp, Response0},
+        CurHeight,
+        sibyl_mgr:sigfun()
+    ),
     {ok, Response1, Ctx}.
 
 -spec follow(
@@ -165,13 +169,12 @@ follow(
 
     %% we want to know when any changes to this SC are applied to the ledger
     %% such as it being closed, so subscribe to events for this SC
-    %% these are published by the ledger commit hooks ( setup via siby_mgr )
+    %% the events are published by the ledger commit hooks ( setup via siby_mgr )
 
     %% the ledger SCs are keyed on combo of sc id and the owner
     %% the ledger commit hooks will publish using this key
     %% so we must subscribe using same key
     %% as we also have the standalone SCID key in state we can utilise that were needed
-    %% TODO: need to normalise this to plain old sc id key, client wont want the owner here
     Key = blockchain_ledger_v1:state_channel_key(SCID, SCOwner),
     SCTopic = sibyl_utils:make_sc_topic(Key),
     lager:info("subscribing to SC events for key ~p and topic ~p", [Key, SCTopic]),
@@ -184,7 +187,7 @@ follow(
         StreamState
     ),
 
-    %% get and update the list of SCs we are already following with this SCID
+    %% add this SC to our follow list
     #handler_state{sc_follows = SCFollows} =
         HandlerState = grpcbox_stream:stream_handler_state(
             StreamState
@@ -215,7 +218,7 @@ handle_event(
             StreamState
         ),
 
-    %% if an SC we are following is closed at the ledger side we will receive an delete event
+    %% if an SC we are following is closed at the ledger side we will receive a delete event
     %% from the ledger commit hook.
     %% the payload will be the ledger key of the SC ( combo of <<owner, sc_id>> )
     %% We we use this event to determine when an SC becomes closed
@@ -369,18 +372,6 @@ is_active_sc(SCID, SCOwner, Chain) ->
         {ok, _SC} -> ok;
         _ -> {error, inactive_sc}
     end.
-
-%%-spec quick_validate(blockchain_state_channel_v1:state_channel()) -> ok | {error, any()}.
-%%quick_validate(SC) ->
-%%    BaseSC = SC#blockchain_state_channel_v1_pb{signature = <<>>},
-%%    EncodedSC = blockchain_state_channel_v1:encode(BaseSC),
-%%    Signature = blockchain_state_channel_v1:signature(SC),
-%%    Owner = blockchain_state_channel_v1:owner(SC),
-%%    PubKey = libp2p_crypto:bin_to_pubkey(Owner),
-%%    case libp2p_crypto:verify(EncodedSC, Signature, PubKey) of
-%%        false -> {error, bad_signature};
-%%        true -> ok
-%%    end.
 
 get_ledger_state_channel(SCID, Owner, Ledger) ->
     case blockchain_ledger_v1:find_state_channel(SCID, Owner, Ledger) of
