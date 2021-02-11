@@ -232,8 +232,14 @@ add_commit_hooks() ->
     %% State Channel Related Hooks
     %% we are interested in receiving incremental/partial updates of route data
     SCUpdateIncrementalFun = fun
-        ([{_CF, put, _Key, _Value}]) ->
-            noop;
+        ([{_CF, put, Key, Value}]) ->
+            %% note: the key will be a combo of <<owner, sc_id>>
+            SCTopic = sibyl_utils:make_sc_topic(Key),
+            lager:info("publishing SC delete event for key ~p and topic ~p", [Key, SCTopic]),
+            erlbus:pub(
+                SCTopic,
+                sibyl_utils:make_event(SCTopic, {put, Key, Value})
+            );
         ([{_CF, delete, Key}]) ->
             %% note: the key will be a combo of <<owner, sc_id>>
             SCTopic = sibyl_utils:make_sc_topic(Key),
@@ -241,7 +247,10 @@ add_commit_hooks() ->
             erlbus:pub(
                 SCTopic,
                 sibyl_utils:make_event(SCTopic, {delete, Key})
-            )
+            );
+        (_Other) ->
+            lager:info("got unknown event for SC ~p", [_Other]),
+            noop
     end,
     %% we do NOT want to be receive events of when there have been state channels updates
     %% and those updates for the current block have *all* been applied
