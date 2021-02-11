@@ -12,7 +12,7 @@
 -define(SC_CLOSABLE, closable).
 -define(SC_DISPUTE, dispute).
 
--type sc_state() :: ?SC_CLOSED | ?SC_CLOSING | ?SC_CLOSABLE | ?SC_DISPUTE.
+-type sc_state() :: undefined | ?SC_CLOSED | ?SC_CLOSING | ?SC_CLOSABLE | ?SC_DISPUTE.
 
 -type sc_ledger() :: blockchain_ledger_state_channel_v1 | blockchain_ledger_state_channel_v2.
 
@@ -87,17 +87,7 @@ handle_info({blockchain_event, {add_block, BlockHash, _Sync, _Ledger} = _Event},
         case blockchain:get_block(BlockHash, Chain) of
             {ok, Block} ->
                 BlockHeight = blockchain_block:height(Block),
-                Txns = blockchain_block:transactions(Block),
-                lists:map(
-                    fun(T) ->
-                        lager:info("txn type ~p at height: ~p", [
-                            blockchain_txn:type(T),
-                            BlockHeight
-                        ])
-                    end,
-                    Txns
-                ),
-                lager:info("processing add_block event for height ~p", [BlockHeight]),
+                lager:debug("processing add_block event for height ~p", [BlockHeight]),
                 process_sc_block_events(BlockHeight, SCGrace, StreamState);
             _ ->
                 %% hmm do nothing...
@@ -132,7 +122,7 @@ is_valid(undefined = _Chain, _Ctx, #validator_sc_is_valid_req_v1_pb{} = _Msg) ->
     lager:debug("chain not ready, returning error response for msg ", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 is_valid(Chain, Ctx, #validator_sc_is_valid_req_v1_pb{sc = SC} = _Message) ->
-    lager:info("executing RPC is_valid with msg ~p", [_Message]),
+    lager:debug("executing RPC is_valid with msg ~p", [_Message]),
     SCID = blockchain_state_channel_v1:id(SC),
     {ok, CurHeight} = get_height(),
     {IsValid, Msg} = is_valid_sc(SC, Chain),
@@ -157,7 +147,7 @@ close(undefined = _Chain, _Ctx, #validator_sc_close_req_v1_pb{} = _Msg) ->
     lager:debug("chain not ready, returning error response for msg ", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 close(_Chain, Ctx, #validator_sc_close_req_v1_pb{close_txn = CloseTxn} = _Message) ->
-    lager:info("executing RPC close with msg ~p", [_Message]),
+    lager:debug("executing RPC close with msg ~p", [_Message]),
     %% TODO, maybe validate the SC exists ? but then if its a v1 it could already have been
     %% deleted from the ledger.....
     SC = blockchain_txn_state_channel_close_v1:state_channel(CloseTxn),
@@ -185,7 +175,7 @@ follow(
     _StreamState
 ) ->
     % if chain not up we have no way to return state channel data so just return a 14/503
-    lager:info("chain not ready, returning error response for msg ", [_Msg]),
+    lager:debug("chain not ready, returning error response for msg ", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 follow(
     Chain,
@@ -194,7 +184,7 @@ follow(
     StreamState
 ) ->
     %% we are not already following this SC, so lets start things rolling
-    lager:info("executing RPC follow for sc id ~p and owner ~p", [SCID, SCOwner]),
+    lager:debug("executing RPC follow for sc id ~p and owner ~p", [SCID, SCOwner]),
     %% get the SC from the ledger
     Ledger = blockchain:ledger(Chain),
     SCGrace = get_sc_grace(Ledger),
@@ -211,7 +201,7 @@ follow(
     %% as we also have the standalone SCID value in state we can utilise that were needed
     LedgerSCID = blockchain_ledger_v1:state_channel_key(SCID, SCOwner),
     SCTopic = sibyl_utils:make_sc_topic(LedgerSCID),
-    lager:info("subscribing to SC events for key ~p and topic ~p", [LedgerSCID, SCTopic]),
+    lager:debug("subscribing to SC events for key ~p and topic ~p", [LedgerSCID, SCTopic]),
     ok = erlbus:sub(self(), SCTopic),
 
     %% add this SC to our follow list
@@ -242,7 +232,7 @@ follow(
     {continue, NewStreamState1};
 follow(_Chain, true = _IsAlreadyFolowing, #validator_sc_follow_req_v1_pb{} = _Msg, StreamState) ->
     %% we are already following this SC - ignore
-    lager:info("ignoring dup follow. Msg ~p", [_Msg]),
+    lager:debug("ignoring dup follow. Msg ~p", [_Msg]),
     {continue, StreamState}.
 
 %% ------------------------------------------------------------------
@@ -260,7 +250,7 @@ handle_event(
     %% and send the corresponding closed event to the client
     %% V2 SCs are not deleted from the ledger upon close instead their close_state is updated
     %% for those the commit hooks will generate a PUT event ( handled below )
-    lager:info("handling delete state channel for ledger key ~p", [LedgerSCID]),
+    lager:debug("handling delete state channel for ledger key ~p", [LedgerSCID]),
     #handler_state{sc_closes_sent = SCClosesSent, sc_follows = SCFollows} =
         HandlerState = grpcbox_stream:stream_handler_state(
             StreamState
@@ -280,9 +270,9 @@ handle_event(
                 StreamState
             ),
             UpdatedSCState =
-                if
-                    WasSent -> ?SC_CLOSED;
-                    true -> SCLastState
+                case WasSent of
+                    true -> ?SC_CLOSED;
+                    _ -> SCLastState
                 end,
             grpcbox_stream:stream_handler_state(
                 NewStreamState,
@@ -316,7 +306,6 @@ handle_event(
                 StreamState;
             {v2, SC} ->
                 CloseState = blockchain_ledger_state_channel_v2:close_state(SC),
-                lager:info("got PUT for S2 with value ~p\n~p", [CloseState, SC]),
                 #handler_state{sc_closes_sent = SCClosesSent, sc_follows = SCFollows} =
                     HandlerState = grpcbox_stream:stream_handler_state(
                         StreamState
@@ -328,7 +317,8 @@ handle_event(
                 %% and send the corresponding closed event to the client
                 %% use the ledger key to get the standalone SC ID from our follow list
                 case maps:get(LedgerSCID, SCFollows) of
-                    {SCMod, SCID, SCExpireAtHeight, SCLastState, SCLastHeight} ->
+                    {SCMod, SCID, SCExpireAtHeight, SCLastState, SCLastBlockTime} ->
+                        lager:debug("got PUT for V2 SC ~p with close state ~p", [SCID, CloseState]),
                         {ok, CurHeight} = get_height(),
                         {WasSent, NewStreamState, NewClosesSent} = maybe_send_follow_msg(
                             lists:member(SCID, SCClosesSent),
@@ -336,7 +326,7 @@ handle_event(
                             {CloseState, SCClosesSent},
                             CurHeight,
                             SCLastState,
-                            SCLastHeight,
+                            SCLastBlockTime,
                             StreamState
                         ),
                         UpdatedSCState =
@@ -378,7 +368,6 @@ process_sc_block_events(BlockTime, SCGrace, StreamState) ->
     #handler_state{sc_follows = SCFollows} = grpcbox_stream:stream_handler_state(
         StreamState
     ),
-    lager:info("checking close events for follow list ~p", [SCFollows]),
     maps:fold(
         fun(K, V, AccStreamState) ->
             process_sc_block_events(K, V, BlockTime, SCGrace, AccStreamState)
@@ -407,7 +396,7 @@ process_sc_block_events(
 ->
     %% send the client a 'closable' msg if the blocktime is same as the SC expire time
     %% unless we previously entered the closed or dispute state
-    lager:info("process_sc_close_events: block time same as SCExpireHeight", []),
+    lager:debug("process_sc_close_events: block time same as SCExpireHeight", []),
     %% send closeable event if not previously sent
     #handler_state{sc_closables_sent = SCClosablesSent} =
         HandlerState = grpcbox_stream:stream_handler_state(
@@ -455,7 +444,7 @@ process_sc_block_events(
 ->
     %% send the client a 'closing' msg if we are past SCExpireTime and within the grace period
     %% unless we previously entered the closed or dispute state
-    lager:info("process_sc_close_events: block time within SC expire-at grace time", []),
+    lager:debug("process_sc_close_events: block time within SC expire-at grace time", []),
     %% send closing event if not previously sent
     #handler_state{sc_closings_sent = SCClosingsSent} =
         HandlerState = grpcbox_stream:stream_handler_state(
@@ -496,7 +485,7 @@ process_sc_block_events(
     _SCGrace,
     StreamState
 ) ->
-    lager:info("process_sc_close_events: nothing to do for SC ~p at blocktime ~p", [
+    lager:debug("process_sc_close_events: nothing to do for SC ~p at blocktime ~p", [
         _SCID,
         _BlockTime
     ]),
@@ -522,14 +511,6 @@ maybe_send_follow_msg(
 ) when SCNewState /= SCOldState andalso Height > SCLastBlockTime ->
     %% we previously did send this state to the client but the state must have subsequently changed
     %% so we can resend it, for example state went from closed -> dispute -> closed
-    lager:info("scid ~p, send ~p, newstate ~p, oldstate ~p, oldheight ~p, newheight ~p", [
-        SCID,
-        _Send,
-        SCNewState,
-        SCOldState,
-        SCLastBlockTime,
-        Height
-    ]),
     send_follow_msg(
         SCID,
         {SCNewState, lists:delete(SCID, SendList)},
@@ -547,14 +528,6 @@ maybe_send_follow_msg(
     StreamState
 ) ->
     %% if we have already sent a msg with the state to the client, dont send again
-    lager:info("scid ~p, send ~p, newstate ~p, oldstate ~p, oldheight ~p, newheight ~p", [
-        _SCID,
-        _Send,
-        _SCNewState,
-        _SCOldState,
-        _SCLastBlockTime,
-        _Height
-    ]),
     {false, StreamState, SendList};
 maybe_send_follow_msg(
     false = _Send,
@@ -562,18 +535,10 @@ maybe_send_follow_msg(
     {SCNewState, SendList},
     Height,
     SCOldState,
-    SCLastBlockTime,
+    _SCLastBlockTime,
     StreamState
 ) ->
     %% client has not been sent a msg with this state, so lets send it
-    lager:info("scid ~p, send ~p, newstate ~p, oldstate ~p, oldheight ~p, newheight ~p", [
-        SCID,
-        _Send,
-        SCNewState,
-        SCOldState,
-        SCLastBlockTime,
-        Height
-    ]),
     send_follow_msg(SCID, {SCNewState, SendList}, Height, SCOldState, StreamState).
 
 -spec send_follow_msg(
@@ -584,7 +549,7 @@ maybe_send_follow_msg(
     grpcbox_stream:t()
 ) -> grpcbox_stream:t().
 send_follow_msg(SCID, {SCNewState, SendList}, Height, _SCOldState, StreamState) ->
-    lager:info("sending SC event ~p for SCID ~p", [SCNewState, SCID]),
+    lager:debug("sending SC event ~p for SCID ~p", [SCNewState, SCID]),
     Msg0 = #validator_sc_follow_streamed_msg_v1_pb{
         close_state = SCNewState,
         sc_id = SCID
