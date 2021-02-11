@@ -122,7 +122,6 @@ address_data([PubKeyAddress | Rest], Hosts) ->
             address_data(Rest, [Address | Hosts]);
         {error, _Reason} ->
             lager:warning("no public ip for router address ~p. Reason ~p", [PubKeyAddress, _Reason]),
-
             address_data(Rest, Hosts)
     end.
 
@@ -154,7 +153,7 @@ check_for_alias(SwarmTID, PubKeyBin) ->
                 libp2p_transport:for_addr(SwarmTID, AliasAddr),
             %% hmm ignore transport for now, assume tcp TODO: revisit
             {IPTuple, _, _, _} = libp2p_transport_tcp:tcp_addr(AliasAddr),
-            format_ip(list_to_binary(inet:ntoa(IPTuple)))
+            {ok, format_ip(list_to_binary(inet:ntoa(IPTuple)))}
     end.
 
 -spec has_addr_public_ip({non_neg_integer(), string()}) -> {ok, binary()} | {error, atom()}.
