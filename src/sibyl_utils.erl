@@ -1,6 +1,6 @@
 -module(sibyl_utils).
 
--include("grpc/autogen/server/validator_pb.hrl").
+-include("grpc/autogen/server/gateway_pb.hrl").
 
 %% API
 -export([
@@ -24,14 +24,14 @@ make_event(EventType, EventPayload) ->
     blockchain_ledger_routing_v1:routing(),
     non_neg_integer(),
     function()
-) -> validator_pb:routing_response_pb().
+) -> gateway_pb:routing_response_pb().
 encode_routing_update_response(Routes, Height, SigFun) ->
     RoutePB = [to_routing_pb(R) || R <- Routes],
     Update = #routing_response_pb{
         routings = RoutePB,
         height = Height
     },
-    EncodedUpdateBin = validator_pb:encode_msg(Update, routing_response_pb),
+    EncodedUpdateBin = gateway_pb:encode_msg(Update, routing_response_pb),
     Update#routing_response_pb{signature = SigFun(EncodedUpdateBin)}.
 
 ensure(_, undefined) ->
@@ -93,7 +93,7 @@ ensure(integer_or_default, Value, Default) ->
 %% ------------------------------------------------------------------
 %% Internal functions
 %% ------------------------------------------------------------------
--spec to_routing_pb(validator_ledger_routing_v1:routing()) -> validator_pb:routing_pb().
+-spec to_routing_pb(gateway_ledger_routing_v1:routing()) -> gateway_pb:routing_pb().
 to_routing_pb(Route) ->
     PubKeyAddresses = blockchain_ledger_routing_v1:addresses(Route),
     %% using the pub keys, attempt to determine public IP for each peer

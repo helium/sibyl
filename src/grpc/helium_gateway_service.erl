@@ -1,9 +1,9 @@
--module(helium_validator_service).
+-module(helium_gateway_service).
 
--behavior(helium_validator_bhvr).
+-behavior(helium_gateway_bhvr).
 
 -include("../../include/sibyl.hrl").
--include("autogen/server/validator_pb.hrl").
+-include("autogen/server/gateway_pb.hrl").
 
 -record(handler_state, {
     initialized = false :: boolean()
@@ -26,7 +26,7 @@ init(StreamState) ->
     ),
     NewStreamState.
 
--spec routing(validator_pb:routing_request_pb(), grpcbox_stream:t()) ->
+-spec routing(gateway_pb:routing_request_pb(), grpcbox_stream:t()) ->
     {continue, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 routing(#routing_request_pb{height = ClientHeight} = Msg, StreamState) ->
     lager:debug("RPC routing called with height ~p", [ClientHeight]),
@@ -36,7 +36,7 @@ routing(#routing_request_pb{height = ClientHeight} = Msg, StreamState) ->
 -spec routing(
     boolean(),
     blockchain:blockchain(),
-    validator_pb:routing_request_pb(),
+    gateway_pb:routing_request_pb(),
     grpcbox_stream:t()
 ) -> {continue, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 routing(_Initialized, undefined = _Chain, #routing_request_pb{} = _Msg, _StreamState) ->
@@ -103,7 +103,7 @@ handle_event(
     lager:warning("received unhandled event ~p", [_Event]),
     StreamState.
 
--spec maybe_send_inital_all_routes_msg(validator_pb:routing_request(), grpcbox_stream:t()) ->
+-spec maybe_send_inital_all_routes_msg(gateway_pb:routing_request(), grpcbox_stream:t()) ->
     grpc:stream().
 maybe_send_inital_all_routes_msg(ClientHeight, StreamState) ->
     %% get the height field from the request msg and only return
