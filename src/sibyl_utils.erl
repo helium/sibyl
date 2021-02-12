@@ -1,59 +1,59 @@
 -module(sibyl_utils).
 
 -include("../include/sibyl.hrl").
--include("grpc/autogen/server/validator_pb.hrl").
--include("grpc/autogen/server/validator_state_channels_pb.hrl").
+-include("grpc/autogen/server/gateway_pb.hrl").
 
 %% API
--export([
-    make_event/1,
-    make_event/2,
-    make_sc_topic/1,
-    encode_routing_update_response/3,
-    encode_validator_resp_v1/3,
-
-    ensure/2,
-    ensure/3
-]).
+-export(
+    [
+        make_event/1,
+        make_event/2,
+        make_sc_topic/1,
+        encode_gateway_resp_v1/3,
+        to_routing_pb/1,
+        ensure/2,
+        ensure/3
+    ]
+).
 
 -spec make_event(binary()) -> sibyl_mgr:event().
 make_event(EventType) ->
     {event, EventType}.
 
--spec make_event(binary(), binary()) -> sibyl_mgr:event().
+-spec make_event(binary(), any()) -> sibyl_mgr:event().
 make_event(EventType, EventPayload) ->
     {event, EventType, EventPayload}.
 
 make_sc_topic(SCID) ->
     <<?EVENT_STATE_CHANNEL_UPDATE/binary, SCID/binary>>.
 
--spec encode_routing_update_response(
-    blockchain_ledger_routing_v1:routing(),
+-spec encode_gateway_resp_v1(
+    {atom(), tuple()},
     non_neg_integer(),
     function()
-) -> validator_pb:routing_response_pb().
-encode_routing_update_response(Routes, Height, SigFun) ->
-    RoutePB = [to_routing_pb(R) || R <- Routes],
-    Update = #routing_response_pb{
-        routings = RoutePB,
-        height = Height
-    },
-    EncodedUpdateBin = validator_pb:encode_msg(Update, routing_response_pb),
-    Update#routing_response_pb{signature = SigFun(EncodedUpdateBin)}.
-
--spec encode_validator_resp_v1(
-    any(),
-    non_neg_integer(),
-    function()
-) -> validator_state_channels_pb:validator_resp_v1_pb().
-encode_validator_resp_v1(Msg, Height, SigFun) ->
-    Update = #validator_resp_v1_pb{
+) -> gateway_pb:gateway_resp_v1_pb().
+encode_gateway_resp_v1(Msg, Height, SigFun) ->
+    Update = #gateway_resp_v1_pb{
         height = Height,
         msg = Msg,
         signature = <<>>
     },
-    EncodedUpdateBin = validator_state_channels_pb:encode_msg(Update, validator_resp_v1_pb),
-    Update#validator_resp_v1_pb{signature = SigFun(EncodedUpdateBin)}.
+    EncodedUpdateBin = gateway_pb:encode_msg(Update, gateway_resp_v1_pb),
+    Update#gateway_resp_v1_pb{signature = SigFun(EncodedUpdateBin)}.
+
+-spec to_routing_pb(blockchain_ledger_routing_v1:routing()) -> gateway_pb:gateway_routing_pb().
+to_routing_pb(Route) ->
+    PubKeyAddresses = blockchain_ledger_routing_v1:addresses(Route),
+    %% using the pub keys, attempt to determine public IP for each peer
+    %% and return in address record
+    Addresses = address_data(PubKeyAddresses),
+    #routing_pb{
+        oui = blockchain_ledger_routing_v1:oui(Route),
+        owner = blockchain_ledger_routing_v1:owner(Route),
+        addresses = Addresses,
+        filters = blockchain_ledger_routing_v1:filters(Route),
+        subnets = blockchain_ledger_routing_v1:subnets(Route)
+    }.
 
 ensure(_, undefined) ->
     undefined;
@@ -70,7 +70,7 @@ ensure(number, Value) when is_atom(Value) ->
 ensure(number, Value) when is_binary(Value) ->
     ensure(number, binary_to_list(Value));
 ensure(number, Value) when is_list(Value) ->
-    p_list_to_num(Value);
+    list_to_num(Value);
 ensure(integer, Value) when is_atom(Value) ->
     ensure(integer, atom_to_list(Value));
 ensure(integer, Value) when is_binary(Value) ->
@@ -114,31 +114,19 @@ ensure(integer_or_default, Value, Default) ->
 %% ------------------------------------------------------------------
 %% Internal functions
 %% ------------------------------------------------------------------
--spec to_routing_pb(validator_ledger_routing_v1:routing()) -> validator_pb:routing_pb().
-to_routing_pb(Route) ->
-    PubKeyAddresses = blockchain_ledger_routing_v1:addresses(Route),
-    %% using the pub keys, attempt to determine public IP for each peer
-    %% and return in address record
-    Addresses = address_data(PubKeyAddresses),
-    #routing_pb{
-        oui = blockchain_ledger_routing_v1:oui(Route),
-        owner = blockchain_ledger_routing_v1:owner(Route),
-        addresses = Addresses,
-        filters = blockchain_ledger_routing_v1:filters(Route),
-        subnets = blockchain_ledger_routing_v1:subnets(Route)
-    }.
 
--spec address_data([libp2p_crypto:pubkey_bin()]) -> [#address_pb{}].
+-spec address_data([libp2p_crypto:pubkey_bin()]) -> [#routing_address_pb{}].
 address_data(Addresses) ->
     address_data(Addresses, []).
 
--spec address_data([libp2p_crypto:pubkey_bin()], [#address_pb{}]) -> [#address_pb{}].
+-spec address_data([libp2p_crypto:pubkey_bin()], [#routing_address_pb{}]) ->
+    [#routing_address_pb{}].
 address_data([], Hosts) ->
     Hosts;
 address_data([PubKeyAddress | Rest], Hosts) ->
     case check_for_public_ip(PubKeyAddress) of
         {ok, IP} ->
-            Address = #address_pb{pub_key = PubKeyAddress, uri = format_ip(IP)},
+            Address = #routing_address_pb{pub_key = PubKeyAddress, uri = format_ip(IP)},
             lager:debug("address data ~p", [Address]),
             address_data(Rest, [Address | Hosts]);
         {error, _Reason} ->
@@ -200,7 +188,7 @@ format_ip(IP, true, Port) ->
 format_ip(IP, false, Port) ->
     list_to_binary(uri_string:normalize(#{scheme => "http", port => Port, host => IP, path => ""})).
 
-p_list_to_num(V) ->
+list_to_num(V) ->
     try
         list_to_float(V)
     catch

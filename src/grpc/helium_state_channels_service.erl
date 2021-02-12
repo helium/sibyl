@@ -1,9 +1,9 @@
--module(helium_validator_state_channels_service).
+-module(helium_state_channels_service).
 
--behavior(helium_validator_state_channels_bhvr).
+-behavior(helium_gateway_state_channels_bhvr).
 
 -include("../../include/sibyl.hrl").
--include("../grpc/autogen/server/validator_state_channels_pb.hrl").
+-include("../grpc/autogen/server/gateway_pb.hrl").
 -include_lib("helium_proto/include/blockchain_state_channel_v1_pb.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
 
@@ -16,9 +16,10 @@
 
 -type sc_ledger() :: blockchain_ledger_state_channel_v1 | blockchain_ledger_state_channel_v2.
 
-%% v1 or v2 SC ledger module
 -type follow() ::
-    {SCLedgerMod :: sc_ledger,
+    %% v1 or v2 SC ledger module
+    {
+        SCLedgerMod :: sc_ledger(),
         %% ID of the SC
         SCID :: binary(),
         %% height at which point the SC will expire
@@ -26,7 +27,8 @@
         %% the last state the SC was determined to be in
         SCLastState :: sc_state(),
         %% the last block height at which we processed the SC
-        SCLastBlockTime :: non_neg_integer()}.
+        SCLastBlockTime :: non_neg_integer()
+    }.
 
 -record(handler_state, {
     %% tracks which SC we are following
@@ -50,7 +52,7 @@
 ]).
 
 %% ------------------------------------------------------------------
-%% helium_validator_state_channels_bhvr callbacks
+%% helium_gateway_state_channels_bhvr callbacks
 %% ------------------------------------------------------------------
 -spec init(grpcbox_stream:t()) -> grpcbox_stream:t().
 init(StreamState) ->
@@ -63,15 +65,15 @@ init(StreamState) ->
     ),
     NewStreamState.
 
-is_valid(Ctx, #validator_sc_is_valid_req_v1_pb{} = Message) ->
+is_valid(Ctx, #gateway_sc_is_valid_req_v1_pb{} = Message) ->
     Chain = sibyl_mgr:blockchain(),
     is_valid(Chain, Ctx, Message).
 
-close(Ctx, #validator_sc_close_req_v1_pb{} = Message) ->
+close(Ctx, #gateway_sc_close_req_v1_pb{} = Message) ->
     Chain = sibyl_mgr:blockchain(),
     close(Chain, Ctx, Message).
 
-follow(#validator_sc_follow_req_v1_pb{sc_id = SCID, owner = SCOwner} = Msg, StreamState) ->
+follow(#gateway_sc_follow_req_v1_pb{sc_id = SCID, owner = SCOwner} = Msg, StreamState) ->
     Chain = sibyl_mgr:blockchain(),
     #handler_state{sc_follows = SCFollows} = grpcbox_stream:stream_handler_state(StreamState),
     Key = blockchain_ledger_v1:state_channel_key(SCID, SCOwner),
@@ -112,26 +114,28 @@ handle_info(
 %% callback breakout functions
 %% ------------------------------------------------------------------
 -spec is_valid(
-    blockchain:blockchain(),
+    undefined | blockchain:blockchain(),
     ctx:ctx(),
-    validator_state_channels_pb:validator_sc_is_valid_req_v1_pb()
-) ->
-    {ok, validator_state_channels_pb:validator_resp_v1_pb(), ctx:ctx()}
-    | grpcbox_stream:grpc_error_response().
-is_valid(undefined = _Chain, _Ctx, #validator_sc_is_valid_req_v1_pb{} = _Msg) ->
+    gateway_pb:gateway_sc_is_valid_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+is_valid(undefined = _Chain, _Ctx, #gateway_sc_is_valid_req_v1_pb{} = _Msg) ->
     lager:debug("chain not ready, returning error response for msg ", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
-is_valid(Chain, Ctx, #validator_sc_is_valid_req_v1_pb{sc = SC} = _Message) ->
+is_valid(Chain, Ctx, #gateway_sc_is_valid_req_v1_pb{sc = SC} = _Message) ->
     lager:debug("executing RPC is_valid with msg ~p", [_Message]),
     SCID = blockchain_state_channel_v1:id(SC),
     {ok, CurHeight} = get_height(),
-    {IsValid, Msg} = is_valid_sc(SC, Chain),
-    Response0 = #validator_sc_is_valid_resp_v1_pb{
+    {IsValid, Msg} =
+        case is_valid_sc(SC, Chain) of
+            {false, Reason} -> {false, Reason};
+            true -> {true, <<>>}
+        end,
+    Response0 = #gateway_sc_is_valid_resp_v1_pb{
         valid = IsValid,
         reason = sibyl_utils:ensure(binary, Msg),
         sc_id = SCID
     },
-    Response1 = sibyl_utils:encode_validator_resp_v1(
+    Response1 = sibyl_utils:encode_gateway_resp_v1(
         {is_valid_resp, Response0},
         CurHeight,
         sibyl_mgr:sigfun()
@@ -141,12 +145,12 @@ is_valid(Chain, Ctx, #validator_sc_is_valid_req_v1_pb{sc = SC} = _Message) ->
 -spec close(
     blockchain:blockchain(),
     ctx:ctx(),
-    validator_state_channels_pb:validator_sc_close_req_v1_pb()
-) -> {ok, validator_state_channels_pb:validator_resp_v1_pb(), ctx:ctx()}.
-close(undefined = _Chain, _Ctx, #validator_sc_close_req_v1_pb{} = _Msg) ->
+    gateway_pb:gateway_sc_close_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()}.
+close(undefined = _Chain, _Ctx, #gateway_sc_close_req_v1_pb{} = _Msg) ->
     lager:debug("chain not ready, returning error response for msg ", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
-close(_Chain, Ctx, #validator_sc_close_req_v1_pb{close_txn = CloseTxn} = _Message) ->
+close(_Chain, Ctx, #gateway_sc_close_req_v1_pb{close_txn = CloseTxn} = _Message) ->
     lager:debug("executing RPC close with msg ~p", [_Message]),
     %% TODO, maybe validate the SC exists ? but then if its a v1 it could already have been
     %% deleted from the ledger.....
@@ -154,8 +158,8 @@ close(_Chain, Ctx, #validator_sc_close_req_v1_pb{close_txn = CloseTxn} = _Messag
     SCID = blockchain_state_channel_v1:id(SC),
     ok = blockchain_worker:submit_txn(CloseTxn),
     {ok, CurHeight} = get_height(),
-    Response0 = #validator_sc_close_resp_v1_pb{sc_id = SCID, response = <<"ok">>},
-    Response1 = sibyl_utils:encode_validator_resp_v1(
+    Response0 = #gateway_sc_close_resp_v1_pb{sc_id = SCID, response = <<"ok">>},
+    Response1 = sibyl_utils:encode_gateway_resp_v1(
         {close_resp, Response0},
         CurHeight,
         sibyl_mgr:sigfun()
@@ -165,13 +169,13 @@ close(_Chain, Ctx, #validator_sc_close_req_v1_pb{close_txn = CloseTxn} = _Messag
 -spec follow(
     blockchain:blockchain(),
     boolean(),
-    state_channel_validator_pb:validator_follow_req_v1_pb(),
+    gateway_pb:gateway_follow_req_v1_pb(),
     grpcbox_stream:t()
 ) -> {continue, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 follow(
     undefined = _Chain,
     _IsAlreadyFolowing,
-    #validator_sc_follow_req_v1_pb{} = _Msg,
+    #gateway_sc_follow_req_v1_pb{} = _Msg,
     _StreamState
 ) ->
     % if chain not up we have no way to return state channel data so just return a 14/503
@@ -180,7 +184,7 @@ follow(
 follow(
     Chain,
     false = _IsAlreadyFolowing,
-    #validator_sc_follow_req_v1_pb{sc_id = SCID, owner = SCOwner} = _Msg,
+    #gateway_sc_follow_req_v1_pb{sc_id = SCID, owner = SCOwner} = _Msg,
     StreamState
 ) ->
     %% we are not already following this SC, so lets start things rolling
@@ -230,7 +234,7 @@ follow(
         NewStreamState0
     ),
     {continue, NewStreamState1};
-follow(_Chain, true = _IsAlreadyFolowing, #validator_sc_follow_req_v1_pb{} = _Msg, StreamState) ->
+follow(_Chain, true = _IsAlreadyFolowing, #gateway_sc_follow_req_v1_pb{} = _Msg, StreamState) ->
     %% we are already following this SC - ignore
     lager:debug("ignoring dup follow. Msg ~p", [_Msg]),
     {continue, StreamState}.
@@ -272,7 +276,7 @@ handle_event(
             UpdatedSCState =
                 case WasSent of
                     true -> ?SC_CLOSED;
-                    _ -> SCLastState
+                    false -> SCLastState
                 end,
             grpcbox_stream:stream_handler_state(
                 NewStreamState,
@@ -330,9 +334,9 @@ handle_event(
                             StreamState
                         ),
                         UpdatedSCState =
-                            if
-                                WasSent -> CloseState;
-                                true -> SCLastState
+                            case WasSent of
+                                true -> CloseState;
+                                false -> SCLastState
                             end,
                         grpcbox_stream:stream_handler_state(
                             NewStreamState,
@@ -499,7 +503,7 @@ process_sc_block_events(
     sc_state(),
     non_neg_integer(),
     grpcbox_stream:t()
-) -> grpcbox_stream:t().
+) -> {boolean(), grpcbox_stream:t(), list()}.
 maybe_send_follow_msg(
     true = _Send,
     SCID,
@@ -547,15 +551,15 @@ maybe_send_follow_msg(
     non_neg_integer(),
     sc_state(),
     grpcbox_stream:t()
-) -> grpcbox_stream:t().
+) -> {boolean(), grpcbox_stream:t(), list()}.
 send_follow_msg(SCID, {SCNewState, SendList}, Height, _SCOldState, StreamState) ->
     lager:debug("sending SC event ~p for SCID ~p", [SCNewState, SCID]),
-    Msg0 = #validator_sc_follow_streamed_msg_v1_pb{
+    Msg0 = #gateway_sc_follow_streamed_resp_v1_pb{
         close_state = SCNewState,
         sc_id = SCID
     },
 
-    Msg1 = sibyl_utils:encode_validator_resp_v1(
+    Msg1 = sibyl_utils:encode_gateway_resp_v1(
         {follow_streamed_msg, Msg0},
         Height,
         sibyl_mgr:sigfun()
@@ -566,9 +570,9 @@ send_follow_msg(SCID, {SCNewState, SendList}, Height, _SCOldState, StreamState) 
 -spec is_valid_sc(
     SC :: blockchain_state_channel_v1:state_channel(),
     Chain :: blockchain:blockchain()
-) -> boolean().
+) -> true | {false, atom()}.
 is_valid_sc(SC, Chain) ->
-    %% the ability of the validator to validate an SC is limited
+    %% the ability of the gateway to validate an SC is limited
     %% as it does not have the full/current SC as seen by both the
     %% gateway and the router.  As such the validation here is basic
     %% and questionable in terms of its usefulness beyond is it on the ledger ????
@@ -606,7 +610,7 @@ get_ledger_state_channel(SCID, Owner, Ledger) ->
         _ -> {error, inactive_sc}
     end.
 
--spec get_height() -> non_neg_integer().
+-spec get_height() -> {ok, non_neg_integer()}.
 get_height() ->
     Chain = sibyl_mgr:blockchain(),
     Ledger = blockchain:ledger(Chain),

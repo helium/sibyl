@@ -1,9 +1,9 @@
--module(helium_validator_service).
+-module(helium_routing_service).
 
--behavior(helium_validator_bhvr).
+-behavior(helium_gateway_routing_bhvr).
 
 -include("../../include/sibyl.hrl").
--include("autogen/server/validator_pb.hrl").
+-include("autogen/server/gateway_pb.hrl").
 
 -record(handler_state, {
     initialized = false :: boolean()
@@ -26,9 +26,9 @@ init(StreamState) ->
     ),
     NewStreamState.
 
--spec routing(validator_pb:routing_request_pb(), grpcbox_stream:t()) ->
+-spec routing(gateway_pb:gateway_routing_req_v1_pb(), grpcbox_stream:t()) ->
     {continue, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
-routing(#routing_request_pb{height = ClientHeight} = Msg, StreamState) ->
+routing(#gateway_routing_req_v1_pb{height = ClientHeight} = Msg, StreamState) ->
     lager:debug("RPC routing called with height ~p", [ClientHeight]),
     #handler_state{initialized = Initialized} = grpcbox_stream:stream_handler_state(StreamState),
     routing(Initialized, sibyl_mgr:blockchain(), Msg, StreamState).
@@ -36,17 +36,17 @@ routing(#routing_request_pb{height = ClientHeight} = Msg, StreamState) ->
 -spec routing(
     boolean(),
     blockchain:blockchain(),
-    validator_pb:routing_request_pb(),
+    gateway_pb:gateway_routing_req_v1_pb(),
     grpcbox_stream:t()
 ) -> {continue, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
-routing(_Initialized, undefined = _Chain, #routing_request_pb{} = _Msg, _StreamState) ->
+routing(_Initialized, undefined = _Chain, #gateway_routing_req_v1_pb{} = _Msg, _StreamState) ->
     % if chain not up we have no way to return routing data so just return a 14/503
     lager:debug("chain not ready, returning error response"),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 routing(
     false = _Initialized,
     _Chain,
-    #routing_request_pb{height = ClientHeight} = _Msg,
+    #gateway_routing_req_v1_pb{height = ClientHeight} = _Msg,
     StreamState
 ) ->
     %% not previously initialized, this must be the first msg from the client
@@ -61,7 +61,7 @@ routing(
         }
     ),
     {continue, NewStreamState0};
-routing(true = _Initialized, _Chain, #routing_request_pb{} = _Msg, StreamState) ->
+routing(true = _Initialized, _Chain, #gateway_routing_req_v1_pb{} = _Msg, StreamState) ->
     %% we previously initialized, this must be a subsequent incoming msg from the client
     %% ignore these and return continue directive
     lager:debug("ignoring subsequent msg from client ~p", [_Msg]),
@@ -102,7 +102,7 @@ handle_event(
     lager:warning("received unhandled event ~p", [_Event]),
     StreamState.
 
--spec maybe_send_inital_all_routes_msg(validator_pb:routing_request(), grpcbox_stream:t()) ->
+-spec maybe_send_inital_all_routes_msg(gateway_pb:routing_request(), grpcbox_stream:t()) ->
     grpc:stream().
 maybe_send_inital_all_routes_msg(ClientHeight, StreamState) ->
     %% get the height field from the request msg and only return
@@ -126,12 +126,15 @@ maybe_send_inital_all_routes_msg(ClientHeight, StreamState) ->
             {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
             case blockchain_ledger_v1:get_routes(Ledger) of
                 {ok, Routes} ->
-                    RoutesPB = sibyl_utils:encode_routing_update_response(
-                        Routes,
+                    Msg0 = #gateway_routing_streamed_resp_v1_pb{
+                        routings = [sibyl_utils:to_routing_pb(R) || R <- Routes]
+                    },
+                    Msg1 = sibyl_utils:encode_gateway_resp_v1(
+                        {routing_streamed_resp, Msg0},
                         CurHeight,
                         sibyl_mgr:sigfun()
                     ),
-                    NewStream = grpcbox_stream:send(false, RoutesPB, StreamState),
+                    NewStream = grpcbox_stream:send(false, Msg1, StreamState),
                     NewStream;
                 {error, _Reason} ->
                     StreamState
