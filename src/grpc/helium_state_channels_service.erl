@@ -33,7 +33,7 @@
 -record(handler_state, {
     %% tracks which SC we are following
     sc_follows = #{} :: #{binary() => follow()},
-    %% tracks which SCs we have send a closef msg for
+    %% tracks which SCs we have send a closed msg for
     sc_closes_sent = [] :: list(),
     %% tracks which SCs we have send a closing msg for
     sc_closings_sent = [] :: list(),

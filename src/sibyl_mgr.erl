@@ -235,43 +235,40 @@ add_commit_hooks() ->
         RouteUpdatesEndFun
     ),
 
-    %%    %% State Channel Related Hooks
-    %%    %% we are interested in receiving incremental/partial updates of route data
-    %%    SCUpdateIncrementalFun = fun
-    %%        ([{_CF, put, Key, Value}]) ->
-    %%            %% note: the key will be a combo of <<owner, sc_id>>
-    %%            SCTopic = sibyl_utils:make_sc_topic(Key),
-    %%            lager:info("publishing SC delete event for key ~p and topic ~p", [Key, SCTopic]),
-    %%            erlbus:pub(
-    %%                SCTopic,
-    %%                sibyl_utils:make_event(SCTopic, {put, Key, Value})
-    %%            );
-    %%        ([{_CF, delete, Key}]) ->
-    %%            %% note: the key will be a combo of <<owner, sc_id>>
-    %%            SCTopic = sibyl_utils:make_sc_topic(Key),
-    %%            lager:info("publishing SC delete event for key ~p and topic ~p", [Key, SCTopic]),
-    %%            erlbus:pub(
-    %%                SCTopic,
-    %%                sibyl_utils:make_event(SCTopic, {delete, Key})
-    %%            );
-    %%        (_Other) ->
-    %%            lager:info("got unknown event for SC ~p", [_Other]),
-    %%            noop
-    %%    end,
-    %%    %% we do NOT want to be receive events of when there have been state channels updates
-    %%    %% and those updates for the current block have *all* been applied
-    %%    SCUpdatesEndFun = fun(_Update) -> noop end,
-    %%
-    %%    SCRef = blockchain_worker:add_commit_hook(
-    %%        ?STATE_CHANNEL_CF_NAME,
-    %%        SCUpdateIncrementalFun,
-    %%        SCUpdatesEndFun
-    %%    ),
+    %% State Channel Related Hooks
+    %% we are interested in receiving incremental/partial updates of route data
+    SCUpdateIncrementalFun = fun
+        ([{_CF, put, Key, Value}]) ->
+            %% note: the key will be a combo of <<owner, sc_id>>
+            SCTopic = sibyl_utils:make_sc_topic(Key),
+            lager:info("publishing SC delete event for key ~p and topic ~p", [Key, SCTopic]),
+            erlbus:pub(
+                SCTopic,
+                sibyl_utils:make_event(SCTopic, {put, Key, Value})
+            );
+        ([{_CF, delete, Key}]) ->
+            %% note: the key will be a combo of <<owner, sc_id>>
+            SCTopic = sibyl_utils:make_sc_topic(Key),
+            lager:info("publishing SC delete event for key ~p and topic ~p", [Key, SCTopic]),
+            erlbus:pub(
+                SCTopic,
+                sibyl_utils:make_event(SCTopic, {delete, Key})
+            );
+        (_Other) ->
+            lager:info("got unknown event for SC ~p", [_Other]),
+            noop
+    end,
+    %% we do NOT want to be receive events of when there have been state channels updates
+    %% and those updates for the current block have *all* been applied
+    SCUpdatesEndFun = fun(_Update) -> noop end,
 
-    %%    lager:info("*** added commit hooks ~p ~p", [RoutingRef, SCRef]),
-    %%    {ok, [RoutingRef, SCRef]}.
-    %%    {ok, [SCRef]}.
-    {ok, [RoutingRef]}.
+    SCRef = blockchain_worker:add_commit_hook(
+        ?STATE_CHANNEL_CF_NAME,
+        SCUpdateIncrementalFun,
+        SCUpdatesEndFun
+    ),
+    lager:info("*** added commit hooks ~p ~p", [RoutingRef, SCRef]),
+    {ok, [RoutingRef, SCRef]}.
 
 -spec subscribe_to_events() -> ok.
 subscribe_to_events() ->
