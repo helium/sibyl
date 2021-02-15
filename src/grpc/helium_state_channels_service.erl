@@ -136,7 +136,7 @@ is_valid(Chain, Ctx, #gateway_sc_is_valid_req_v1_pb{sc = SC} = _Message) ->
         sc_id = SCID
     },
     Response1 = sibyl_utils:encode_gateway_resp_v1(
-        {is_valid_resp, Response0},
+        Response0,
         CurHeight,
         sibyl_mgr:sigfun()
     ),
@@ -160,7 +160,7 @@ close(_Chain, Ctx, #gateway_sc_close_req_v1_pb{close_txn = CloseTxn} = _Message)
     {ok, CurHeight} = get_height(),
     Response0 = #gateway_sc_close_resp_v1_pb{sc_id = SCID, response = <<"ok">>},
     Response1 = sibyl_utils:encode_gateway_resp_v1(
-        {close_resp, Response0},
+        Response0,
         CurHeight,
         sibyl_mgr:sigfun()
     ),
@@ -250,10 +250,10 @@ handle_event(
     %% if a V1 SC we are following is closed at the ledger side we will receive a delete event
     %% from the ledger commit hook.
     %% the payload will be the ledger key of the SC ( combo of <<owner, sc_id>> )
-    %% We use this event to identify when an SC becomes closed
+    %% We use this event to identify when a V1 SC becomes closed
     %% and send the corresponding closed event to the client
     %% V2 SCs are not deleted from the ledger upon close instead their close_state is updated
-    %% for those the commit hooks will generate a PUT event ( handled below )
+    %% for those the commit hooks will generate a PUT event ( handled elsewhere )
     lager:debug("handling delete state channel for ledger key ~p", [LedgerSCID]),
     #handler_state{sc_closes_sent = SCClosesSent, sc_follows = SCFollows} =
         HandlerState = grpcbox_stream:stream_handler_state(
@@ -309,25 +309,23 @@ handle_event(
             {v1, _SC} ->
                 StreamState;
             {v2, SC} ->
-                CloseState = blockchain_ledger_state_channel_v2:close_state(SC),
+                LedgerCloseState = blockchain_ledger_state_channel_v2:close_state(SC),
                 #handler_state{sc_closes_sent = SCClosesSent, sc_follows = SCFollows} =
                     HandlerState = grpcbox_stream:stream_handler_state(
                         StreamState
                     ),
-                %% if an SC we are following is closed at the ledger side we will receive a delete event
-                %% from the ledger commit hook.
-                %% the payload will be the ledger key of the SC ( combo of <<owner, sc_id>> )
-                %% We we use this event to determine when an SC becomes closed
-                %% and send the corresponding closed event to the client
                 %% use the ledger key to get the standalone SC ID from our follow list
                 case maps:get(LedgerSCID, SCFollows) of
                     {SCMod, SCID, SCExpireAtHeight, SCLastState, SCLastBlockTime} ->
-                        lager:debug("got PUT for V2 SC ~p with close state ~p", [SCID, CloseState]),
+                        lager:debug("got PUT for V2 SC ~p with close state ~p", [
+                            SCID,
+                            LedgerCloseState
+                        ]),
                         {ok, CurHeight} = get_height(),
                         {WasSent, NewStreamState, NewClosesSent} = maybe_send_follow_msg(
                             lists:member(SCID, SCClosesSent),
                             SCID,
-                            {CloseState, SCClosesSent},
+                            {LedgerCloseState, SCClosesSent},
                             CurHeight,
                             SCLastState,
                             SCLastBlockTime,
@@ -335,7 +333,7 @@ handle_event(
                         ),
                         UpdatedSCState =
                             case WasSent of
-                                true -> CloseState;
+                                true -> LedgerCloseState;
                                 false -> SCLastState
                             end,
                         grpcbox_stream:stream_handler_state(
@@ -368,7 +366,7 @@ handle_event(
 %%        what is below is a best guess for now
 process_sc_block_events(BlockTime, SCGrace, StreamState) ->
     %% for each SC we are following, check if we are now in a closable or closing state
-    %% ( we will derive close state from the ledger update events )
+    %% ( we will derive close and dispute states from the ledger update events )
     #handler_state{sc_follows = SCFollows} = grpcbox_stream:stream_handler_state(
         StreamState
     ),
@@ -505,7 +503,7 @@ process_sc_block_events(
     grpcbox_stream:t()
 ) -> {boolean(), grpcbox_stream:t(), list()}.
 maybe_send_follow_msg(
-    true = _Send,
+    true = _SentPreviously,
     SCID,
     {SCNewState, SendList},
     Height,
@@ -523,7 +521,7 @@ maybe_send_follow_msg(
         StreamState
     );
 maybe_send_follow_msg(
-    true = _Send,
+    true = _SentPreviously,
     _SCID,
     {_SCNewState, SendList},
     _Height,
@@ -534,7 +532,7 @@ maybe_send_follow_msg(
     %% if we have already sent a msg with the state to the client, dont send again
     {false, StreamState, SendList};
 maybe_send_follow_msg(
-    false = _Send,
+    false = _SentPreviously,
     SCID,
     {SCNewState, SendList},
     Height,
@@ -558,9 +556,8 @@ send_follow_msg(SCID, {SCNewState, SendList}, Height, _SCOldState, StreamState) 
         close_state = SCNewState,
         sc_id = SCID
     },
-
     Msg1 = sibyl_utils:encode_gateway_resp_v1(
-        {follow_streamed_msg, Msg0},
+        Msg0,
         Height,
         sibyl_mgr:sigfun()
     ),

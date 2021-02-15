@@ -3,6 +3,12 @@
 -include("../include/sibyl.hrl").
 -include("grpc/autogen/server/gateway_pb.hrl").
 
+-type gateway_resp_type() ::
+    gateway_pb:gateway_sc_is_valid_resp_v1_pb()
+    | gateway_pb:gateway_sc_close_resp_v1_pb()
+    | gateway_pb:gateway_sc_follow_streamed_resp_v1_pb()
+    | gateway_pb:gateway_routing_streamed_resp_v1_pb().
+
 %% API
 -export(
     [
@@ -28,18 +34,18 @@ make_sc_topic(SCID) ->
     <<?EVENT_STATE_CHANNEL_UPDATE/binary, SCID/binary>>.
 
 -spec encode_gateway_resp_v1(
-    {atom(), tuple()},
+    gateway_resp_type(),
     non_neg_integer(),
     function()
 ) -> gateway_pb:gateway_resp_v1_pb().
-encode_gateway_resp_v1(Msg, Height, SigFun) ->
-    Update = #gateway_resp_v1_pb{
-        height = Height,
-        msg = Msg,
-        signature = <<>>
-    },
-    EncodedUpdateBin = gateway_pb:encode_msg(Update, gateway_resp_v1_pb),
-    Update#gateway_resp_v1_pb{signature = SigFun(EncodedUpdateBin)}.
+encode_gateway_resp_v1(#gateway_sc_is_valid_resp_v1_pb{} = Msg, Height, SigFun) ->
+    do_encode_gateway_resp_v1({is_valid_resp, Msg}, Height, SigFun);
+encode_gateway_resp_v1(#gateway_sc_close_resp_v1_pb{} = Msg, Height, SigFun) ->
+    do_encode_gateway_resp_v1({close_resp, Msg}, Height, SigFun);
+encode_gateway_resp_v1(#gateway_sc_follow_streamed_resp_v1_pb{} = Msg, Height, SigFun) ->
+    do_encode_gateway_resp_v1({follow_streamed_resp, Msg}, Height, SigFun);
+encode_gateway_resp_v1(#gateway_routing_streamed_resp_v1_pb{} = Msg, Height, SigFun) ->
+    do_encode_gateway_resp_v1({routing_streamed_resp, Msg}, Height, SigFun).
 
 -spec to_routing_pb(blockchain_ledger_routing_v1:routing()) -> gateway_pb:gateway_routing_pb().
 to_routing_pb(Route) ->
@@ -114,6 +120,19 @@ ensure(integer_or_default, Value, Default) ->
 %% ------------------------------------------------------------------
 %% Internal functions
 %% ------------------------------------------------------------------
+-spec do_encode_gateway_resp_v1(
+    {atom(), gateway_resp_type()},
+    non_neg_integer(),
+    function()
+) -> gateway_pb:gateway_resp_v1_pb().
+do_encode_gateway_resp_v1(Msg, Height, SigFun) ->
+    Update = #gateway_resp_v1_pb{
+        height = Height,
+        msg = Msg,
+        signature = <<>>
+    },
+    EncodedUpdateBin = gateway_pb:encode_msg(Update, gateway_resp_v1_pb),
+    Update#gateway_resp_v1_pb{signature = SigFun(EncodedUpdateBin)}.
 
 -spec address_data([libp2p_crypto:pubkey_bin()]) -> [#routing_address_pb{}].
 address_data(Addresses) ->

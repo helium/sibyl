@@ -182,7 +182,7 @@ handle_info(
         routings = [sibyl_utils:to_routing_pb(R) || R <- Routes]
     },
     Msg1 = sibyl_utils:encode_gateway_resp_v1(
-        {routing_streamed_resp, Msg0},
+        Msg0,
         CurHeight,
         sibyl_mgr:sigfun()
     ),
