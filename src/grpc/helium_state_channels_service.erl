@@ -56,7 +56,7 @@
 %% ------------------------------------------------------------------
 -spec init(grpcbox_stream:t()) -> grpcbox_stream:t().
 init(StreamState) ->
-    lager:debug("handler init, stream state ~p", [StreamState]),
+    lager:info("handler init, stream state ~p", [StreamState]),
     %% subscribe to block events so we can get blocktime
     ok = blockchain_event:add_handler(self()),
     NewStreamState = grpcbox_stream:stream_handler_state(
@@ -89,7 +89,7 @@ handle_info({blockchain_event, {add_block, BlockHash, _Sync, _Ledger} = _Event},
         case blockchain:get_block(BlockHash, Chain) of
             {ok, Block} ->
                 BlockHeight = blockchain_block:height(Block),
-                lager:debug("processing add_block event for height ~p", [BlockHeight]),
+                lager:info("processing add_block event for height ~p", [BlockHeight]),
                 process_sc_block_events(BlockHeight, SCGrace, StreamState);
             _ ->
                 %% hmm do nothing...
@@ -100,7 +100,7 @@ handle_info(
     {event, _EventTopic, _Payload} = Event,
     StreamState
 ) ->
-    lager:debug("received event ~p", [Event]),
+    lager:info("received event ~p", [Event]),
     NewStreamState = handle_event(Event, StreamState),
     NewStreamState;
 handle_info(
@@ -119,27 +119,32 @@ handle_info(
     gateway_pb:gateway_sc_is_valid_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
 is_valid(undefined = _Chain, _Ctx, #gateway_sc_is_valid_req_v1_pb{} = _Msg) ->
-    lager:debug("chain not ready, returning error response for msg ", [_Msg]),
+    lager:info("chain not ready, returning error response for msg ", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 is_valid(Chain, Ctx, #gateway_sc_is_valid_req_v1_pb{sc = SC} = _Message) ->
-    lager:debug("executing RPC is_valid with msg ~p", [_Message]),
+    lager:info("executing RPC is_valid with msg ~p", [_Message]),
     SCID = blockchain_state_channel_v1:id(SC),
+    lager:info("*** point 1", []),
     {ok, CurHeight} = get_height(),
+    lager:info("*** point 2", []),
     {IsValid, Msg} =
         case is_valid_sc(SC, Chain) of
             {false, Reason} -> {false, Reason};
             true -> {true, <<>>}
         end,
+    lager:info("*** point 3", []),
     Response0 = #gateway_sc_is_valid_resp_v1_pb{
         valid = IsValid,
         reason = sibyl_utils:ensure(binary, Msg),
         sc_id = SCID
     },
+    lager:info("*** point 4", []),
     Response1 = sibyl_utils:encode_gateway_resp_v1(
         Response0,
         CurHeight,
         sibyl_mgr:sigfun()
     ),
+    lager:info("*** point 5 ~p", [Response1]),
     {ok, Response1, Ctx}.
 
 -spec close(
@@ -148,10 +153,10 @@ is_valid(Chain, Ctx, #gateway_sc_is_valid_req_v1_pb{sc = SC} = _Message) ->
     gateway_pb:gateway_sc_close_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()}.
 close(undefined = _Chain, _Ctx, #gateway_sc_close_req_v1_pb{} = _Msg) ->
-    lager:debug("chain not ready, returning error response for msg ", [_Msg]),
+    lager:info("chain not ready, returning error response for msg ", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 close(_Chain, Ctx, #gateway_sc_close_req_v1_pb{close_txn = CloseTxn} = _Message) ->
-    lager:debug("executing RPC close with msg ~p", [_Message]),
+    lager:info("executing RPC close with msg ~p", [_Message]),
     %% TODO, maybe validate the SC exists ? but then if its a v1 it could already have been
     %% deleted from the ledger.....
     SC = blockchain_txn_state_channel_close_v1:state_channel(CloseTxn),
@@ -179,7 +184,7 @@ follow(
     _StreamState
 ) ->
     % if chain not up we have no way to return state channel data so just return a 14/503
-    lager:debug("chain not ready, returning error response for msg ", [_Msg]),
+    lager:info("chain not ready, returning error response for msg ", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 follow(
     Chain,
@@ -188,7 +193,7 @@ follow(
     StreamState
 ) ->
     %% we are not already following this SC, so lets start things rolling
-    lager:debug("executing RPC follow for sc id ~p and owner ~p", [SCID, SCOwner]),
+    lager:info("executing RPC follow for sc id ~p and owner ~p", [SCID, SCOwner]),
     %% get the SC from the ledger
     Ledger = blockchain:ledger(Chain),
     SCGrace = get_sc_grace(Ledger),
@@ -205,7 +210,7 @@ follow(
     %% as we also have the standalone SCID value in state we can utilise that were needed
     LedgerSCID = blockchain_ledger_v1:state_channel_key(SCID, SCOwner),
     SCTopic = sibyl_utils:make_sc_topic(LedgerSCID),
-    lager:debug("subscribing to SC events for key ~p and topic ~p", [LedgerSCID, SCTopic]),
+    lager:info("subscribing to SC events for key ~p and topic ~p", [LedgerSCID, SCTopic]),
     ok = erlbus:sub(self(), SCTopic),
 
     %% add this SC to our follow list
@@ -236,7 +241,7 @@ follow(
     {continue, NewStreamState1};
 follow(_Chain, true = _IsAlreadyFolowing, #gateway_sc_follow_req_v1_pb{} = _Msg, StreamState) ->
     %% we are already following this SC - ignore
-    lager:debug("ignoring dup follow. Msg ~p", [_Msg]),
+    lager:info("ignoring dup follow. Msg ~p", [_Msg]),
     {continue, StreamState}.
 
 %% ------------------------------------------------------------------
@@ -254,7 +259,7 @@ handle_event(
     %% and send the corresponding closed event to the client
     %% V2 SCs are not deleted from the ledger upon close instead their close_state is updated
     %% for those the commit hooks will generate a PUT event ( handled elsewhere )
-    lager:debug("handling delete state channel for ledger key ~p", [LedgerSCID]),
+    lager:info("handling delete state channel for ledger key ~p", [LedgerSCID]),
     #handler_state{sc_closes_sent = SCClosesSent, sc_follows = SCFollows} =
         HandlerState = grpcbox_stream:stream_handler_state(
             StreamState
@@ -317,7 +322,7 @@ handle_event(
                 %% use the ledger key to get the standalone SC ID from our follow list
                 case maps:get(LedgerSCID, SCFollows) of
                     {SCMod, SCID, SCExpireAtHeight, SCLastState, SCLastBlockTime} ->
-                        lager:debug("got PUT for V2 SC ~p with close state ~p", [
+                        lager:info("got PUT for V2 SC ~p with close state ~p", [
                             SCID,
                             LedgerCloseState
                         ]),
@@ -398,7 +403,7 @@ process_sc_block_events(
 ->
     %% send the client a 'closable' msg if the blocktime is same as the SC expire time
     %% unless we previously entered the closed or dispute state
-    lager:debug("process_sc_close_events: block time same as SCExpireHeight", []),
+    lager:info("process_sc_close_events: block time same as SCExpireHeight", []),
     %% send closeable event if not previously sent
     #handler_state{sc_closables_sent = SCClosablesSent} =
         HandlerState = grpcbox_stream:stream_handler_state(
@@ -446,7 +451,7 @@ process_sc_block_events(
 ->
     %% send the client a 'closing' msg if we are past SCExpireTime and within the grace period
     %% unless we previously entered the closed or dispute state
-    lager:debug("process_sc_close_events: block time within SC expire-at grace time", []),
+    lager:info("process_sc_close_events: block time within SC expire-at grace time", []),
     %% send closing event if not previously sent
     #handler_state{sc_closings_sent = SCClosingsSent} =
         HandlerState = grpcbox_stream:stream_handler_state(
@@ -487,7 +492,7 @@ process_sc_block_events(
     _SCGrace,
     StreamState
 ) ->
-    lager:debug("process_sc_close_events: nothing to do for SC ~p at blocktime ~p", [
+    lager:info("process_sc_close_events: nothing to do for SC ~p at blocktime ~p", [
         _SCID,
         _BlockTime
     ]),
@@ -551,7 +556,7 @@ maybe_send_follow_msg(
     grpcbox_stream:t()
 ) -> {boolean(), grpcbox_stream:t(), list()}.
 send_follow_msg(SCID, {SCNewState, SendList}, Height, _SCOldState, StreamState) ->
-    lager:debug("sending SC event ~p for SCID ~p", [SCNewState, SCID]),
+    lager:info("sending SC event ~p for SCID ~p", [SCNewState, SCID]),
     Msg0 = #gateway_sc_follow_streamed_resp_v1_pb{
         close_state = SCNewState,
         sc_id = SCID
@@ -582,7 +587,7 @@ is_valid_sc(SC, Chain) ->
         {error, Reason} = _E ->
             {false, Reason};
         ok ->
-            {true, <<>>}
+            true
     end.
 
 -spec is_active_sc(
