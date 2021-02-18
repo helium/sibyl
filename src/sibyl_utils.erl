@@ -150,7 +150,6 @@ address_data([PubKeyAddress | Rest], Hosts) ->
             address_data(Rest, [Address | Hosts]);
         {error, _Reason} ->
             lager:warning("no public ip for router address ~p. Reason ~p", [PubKeyAddress, _Reason]),
-
             address_data(Rest, Hosts)
     end.
 
@@ -163,8 +162,10 @@ check_for_public_ip(PubKeyBin) ->
         {ok, PeerInfo} ->
             ClearedListenAddrs = libp2p_peer:cleared_listen_addrs(PeerInfo),
             %% sort listen addrs, ensure the public ip is at the head
-            [H | _] = libp2p_transport:sort_addrs_with_keys(SwarmTID, ClearedListenAddrs),
-            has_addr_public_ip(H);
+            case libp2p_transport:sort_addrs_with_keys(SwarmTID, ClearedListenAddrs) of
+                [] -> {error, no_addrs};
+                [H | _] -> has_addr_public_ip(H)
+            end;
         {error, not_found} ->
             %% we dont have this peer in our peerbook, check if we have an alias for it
             check_for_alias(SwarmTID, PubKeyBin)
