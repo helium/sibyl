@@ -222,11 +222,13 @@ add_commit_hooks() ->
     %% and those updates for the current block have *all* been applied
     RouteUpdatesEndFun = fun
         (?ROUTING_CF_NAME = _CFName) ->
+            lager:info("publishing routing updates end event", []),
             erlbus:pub(
                 ?EVENT_ROUTING_UPDATES_END,
                 sibyl_utils:make_event(?EVENT_ROUTING_UPDATES_END)
             );
         (_CFName) ->
+            lager:info("bad cf name ~p", [_CFName]),
             noop
     end,
     RoutingRef = blockchain_worker:add_commit_hook(

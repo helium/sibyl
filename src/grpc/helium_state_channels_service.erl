@@ -119,7 +119,7 @@ handle_info(
     gateway_pb:gateway_sc_is_valid_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
 is_valid(undefined = _Chain, _Ctx, #gateway_sc_is_valid_req_v1_pb{} = _Msg) ->
-    lager:info("chain not ready, returning error response for msg ", [_Msg]),
+    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 is_valid(Chain, Ctx, #gateway_sc_is_valid_req_v1_pb{sc = SC} = _Message) ->
     lager:info("executing RPC is_valid with msg ~p", [_Message]),
@@ -153,7 +153,7 @@ is_valid(Chain, Ctx, #gateway_sc_is_valid_req_v1_pb{sc = SC} = _Message) ->
     gateway_pb:gateway_sc_close_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()}.
 close(undefined = _Chain, _Ctx, #gateway_sc_close_req_v1_pb{} = _Msg) ->
-    lager:info("chain not ready, returning error response for msg ", [_Msg]),
+    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 close(_Chain, Ctx, #gateway_sc_close_req_v1_pb{close_txn = CloseTxn} = _Message) ->
     lager:info("executing RPC close with msg ~p", [_Message]),
@@ -184,7 +184,7 @@ follow(
     _StreamState
 ) ->
     % if chain not up we have no way to return state channel data so just return a 14/503
-    lager:info("chain not ready, returning error response for msg ", [_Msg]),
+    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 follow(
     Chain,
