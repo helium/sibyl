@@ -189,12 +189,7 @@ init_per_testcase(TestCase, Config) ->
     ),
 
     %% wait until the local node has the genesis block
-    ok = sibyl_ct_utils:wait_until(fun() ->
-            C0 = blockchain_worker:blockchain(),
-            {ok, Height} = blockchain:height(C0),
-            ct:pal("local node height ~p", [Height]),
-            Height == 1
-        end, 100, 100),
+    ok = sibyl_ct_utils:wait_until_local_height(1),
 
     ok = sibyl_ct_utils:check_genesis_block(InitConfig, GenesisBlock),
     ConsensusMembers = sibyl_ct_utils:get_consensus_members(InitConfig, ConsensusAddrs),
@@ -277,12 +272,7 @@ is_valid_sc_test(Config) ->
     ]),
 
     %% Wait till the block is gossiped
-    ok = sibyl_ct_utils:wait_until(fun()->
-        C = blockchain_worker:blockchain(),
-        {ok, Height} = blockchain:height(C),
-        ct:pal("local height ~p", [Height]),
-        Height == 2
-        end, 100, 100),
+    ok = sibyl_ct_utils:wait_until_local_height(2),
 
     %% Checking that state channel got created properly
     {true, _SC1} = check_sc_open(RouterNode, RouterChain, RouterPubkeyBin, ID),
@@ -380,12 +370,7 @@ close_sc_test(Config) ->
     ]),
 
     %% Wait till the block is gossiped
-    ok = sibyl_ct_utils:wait_until(fun()->
-        C = blockchain_worker:blockchain(),
-        {ok, Height} = blockchain:height(C),
-        ct:pal("local height ~p", [Height]),
-        Height == 2
-        end, 100, 100),
+   ok = sibyl_ct_utils:wait_until_local_height(2),
 
     %% Checking that state channel got created properly
     {true, _SC1} = check_sc_open(RouterNode, RouterChain, RouterPubkeyBin, ID),
@@ -456,6 +441,11 @@ follow_sc_test(Config) ->
     RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, swarm, []),
     RouterPubkeyBin = ct_rpc:call(RouterNode, blockchain_swarm, pubkey_bin, []),
 
+    %% Get local chain, swarm and pubkey_bin
+    LocalChain = blockchain_worker:blockchain(),
+    LocalSwarm = blockchain_swarm:swarm(),
+    _LocalPubkeyBin = blockchain_swarm:pubkey_bin(),
+
     %% Check that the meck txn forwarding works
     Self = self(),
     ok = sibyl_ct_utils:setup_meck_txn_forwarding(RouterNode, Self),
@@ -502,12 +492,7 @@ follow_sc_test(Config) ->
     ]),
 
     %% Wait till the block is gossiped
-    ok = sibyl_ct_utils:wait_until(fun()->
-        C = blockchain_worker:blockchain(),
-        {ok, Height} = blockchain:height(C),
-        ct:pal("local height ~p", [Height]),
-        Height == 2
-        end, 100, 100),
+    ok = sibyl_ct_utils:wait_until_local_height(2),
 
     %% Checking that state channel got created properly
     {true, SC1} = check_sc_open(RouterNode, RouterChain, RouterPubkeyBin, ID1),
@@ -542,30 +527,12 @@ follow_sc_test(Config) ->
     ?assertEqual(ID1, ActiveSCID),
     ok = grpc_client:send(Stream, #{sc_id => ID1, owner => blockchain_ledger_state_channel_v1:owner(SC1)}),
     ok = grpc_client:send(Stream, #{sc_id => ID2, owner => blockchain_ledger_state_channel_v1:owner(SC2)}),
-    timer:sleep(5000),
-%%    ok = sibyl_ct_utils:wait_until(fun()->
-%%        C = blockchain_worker:blockchain(),
-%%        {ok, Height} = blockchain:height(C),
-%%        ct:pal("local height ~p", [Height]),
-%%        Height == 20
-%%        end, 100, 100),
+    ok= timer:sleep(timer:seconds(2)),
 
-    %% Adding fake blocks to get the state channel 1 to expire
-    FakeBlocks = 12,
-    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(FakeBlocks, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, self()),
-    ok = sibyl_ct_utils:wait_until_height(RouterNode, 14),
-
-    %% wait until we see a close txn for SC1
-    %% then check for the expected follow msgs
-    %% the msgs will have been sent at different block heights and queued up on the client
-    receive
-        {txn, Txn1} ->
-            ?assertEqual(blockchain_txn_state_channel_close_v1, blockchain_txn:type(Txn1)),
-            {ok, B1} = ct_rpc:call(RouterNode, sibyl_ct_utils, create_block, [ConsensusMembers, [Txn1]]),
-            _ = ct_rpc:call(RouterNode, blockchain_gossip_handler, add_block, [B1, RouterChain, Self, RouterSwarm])
-    after 10000 ->
-        ct:fail("txn timeout")
-    end,
+    %% Adding fake blocks to get the state channel 1 to hit the various follow events
+    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(11, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
+    %% HEIGHT MARKER -> 13
+    ok = sibyl_ct_utils:wait_until_local_height(13),
 
     %% headers are always sent with the first data msg
     {headers, Headers0} = grpc_client:rcv(Stream, 5000),
@@ -580,13 +547,39 @@ follow_sc_test(Config) ->
     ?assertEqual(ActiveSCID, Data0SCID1),
     ?assertEqual(closable, Data0CloseState),
 
+    %% add additional blocks to trigger the closing state
+    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(1, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
+    %% HEIGHT MARKER -> 14
+    ok = sibyl_ct_utils:wait_until_local_height(14),
+
     {data, #{height := 14, msg := {follow_streamed_resp, Data1FollowMsg}}} = Data1 = grpc_client:rcv(Stream, 15000),
     ct:pal("Response Data1: ~p", [Data1]),
     #{sc_id := Data1SCID1, close_state := Data1CloseState} = Data1FollowMsg,
     ?assertEqual(ActiveSCID, Data1SCID1),
     ?assertEqual(closing, Data1CloseState),
 
-    {data, #{height := 15, msg := {follow_streamed_resp, Data2FollowMsg}}} = Data2 = grpc_client:rcv(Stream, 15000),
+    %% add additional blocks to trigger the SC close and thus the closed state
+    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(2, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
+    %% HEIGHT MARKER -> 16
+    ok = sibyl_ct_utils:wait_until_local_height(16),
+
+    %% wait until we see a close txn for SC1
+    %% then check for the expected follow msgs
+    %% the msgs will have been sent at different block heights and queued up on the client
+    receive
+        {txn, Txn1} ->
+            ?assertEqual(blockchain_txn_state_channel_close_v1, blockchain_txn:type(Txn1)),
+            {ok, B1} = ct_rpc:call(RouterNode, sibyl_ct_utils, create_block, [ConsensusMembers, [Txn1]]),
+            _ = ct_rpc:call(RouterNode, blockchain_gossip_handler, add_block, [B1, RouterChain, Self, RouterSwarm]),
+            _ = blockchain_gossip_handler:add_block(B1, LocalChain, Self, LocalSwarm)
+    after 10000 ->
+        ct:fail("txn timeout")
+    end,
+
+    %% HEIGHT MARKER -> 17
+    ok = sibyl_ct_utils:wait_until_local_height(17),
+
+    {data, #{height := 17, msg := {follow_streamed_resp, Data2FollowMsg}}} = Data2 = grpc_client:rcv(Stream, 15000),
     ct:pal("Response Data2: ~p", [Data2]),
     #{sc_id := Data2SCID1, close_state := Data2CloseState} = Data2FollowMsg,
     ?assertEqual(ActiveSCID, Data2SCID1),
@@ -599,21 +592,9 @@ follow_sc_test(Config) ->
     ?assertNotEqual(ActiveSCID, ActiveSCID2),
 
     %% Adding fake blocks to get state channel 2 to expire
-    FakeBlocks2 = 5,
-    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(FakeBlocks2, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, self()),
-    ok = sibyl_ct_utils:wait_until_height(RouterNode, 20),
-
-    %% wait until we see a close txn for SC1
-    %% then check for the expected follow msgs
-    %% the msgs will have been sent at different block heights and queued up on the client
-    receive
-        {txn, Txn2} ->
-            ?assertEqual(blockchain_txn_state_channel_close_v1, blockchain_txn:type(Txn2)),
-            {ok, B2} = ct_rpc:call(RouterNode, sibyl_ct_utils, create_block, [ConsensusMembers, [Txn2]]),
-            _ = ct_rpc:call(RouterNode, blockchain_gossip_handler, add_block, [B2, RouterChain, Self, RouterSwarm])
-    after 10000 ->
-        ct:fail("txn timeout")
-    end,
+    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(2, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
+    %% HEIGHT MARKER -> 19
+    ok = sibyl_ct_utils:wait_until_local_height(19),
 
     {data, #{height := 19, msg := {follow_streamed_resp, Data3FollowMsg}}} = Data3 = grpc_client:rcv(Stream, 15000),
     ct:pal("Response Data3: ~p", [Data3]),
@@ -621,13 +602,38 @@ follow_sc_test(Config) ->
     ?assertEqual(ActiveSCID2, Data3SCID2),
     ?assertEqual(Data3CloseState, closable),
 
+    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(1, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
+    %% HEIGHT MARKER -> 20
+    ok = sibyl_ct_utils:wait_until_local_height(20),
+
     {data, #{height := 20, msg := {follow_streamed_resp, Data4FollowMsg}}} = Data4 = grpc_client:rcv(Stream, 15000),
     ct:pal("Response Data4: ~p", [Data4]),
     #{sc_id := Data4SCID2, close_state := Data4CloseState} = Data4FollowMsg,
     ?assertEqual(ActiveSCID2, Data4SCID2),
     ?assertEqual(Data4CloseState, closing),
 
-    {data, #{height := 21, msg := {follow_streamed_resp, Data5FollowMsg}}} = Data5 = grpc_client:rcv(Stream, 15000),
+    %% wait until we see a close txn for SC2
+    %% then check for the expected follow msgs
+    %% the msgs will have been sent at different block heights and queued up on the client
+
+    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(1, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
+    %% HEIGHT MARKER -> 21
+    ok = sibyl_ct_utils:wait_until_local_height(21),
+
+    receive
+        {txn, Txn2} ->
+            ?assertEqual(blockchain_txn_state_channel_close_v1, blockchain_txn:type(Txn2)),
+            {ok, B2} = ct_rpc:call(RouterNode, sibyl_ct_utils, create_block, [ConsensusMembers, [Txn2]]),
+            _ = ct_rpc:call(RouterNode, blockchain_gossip_handler, add_block, [B2, RouterChain, Self, RouterSwarm]),
+            _ = blockchain_gossip_handler:add_block(B2, LocalChain, Self, LocalSwarm)
+    after 10000 ->
+        ct:fail("txn timeout")
+    end,
+
+    %% HEIGHT MARKER -> 22
+    ok = sibyl_ct_utils:wait_until_local_height(22),
+
+    {data, #{height := 22, msg := {follow_streamed_resp, Data5FollowMsg}}} = Data5 = grpc_client:rcv(Stream, 15000),
     ct:pal("Response Data5: ~p", [Data5]),
     #{sc_id := Data5SCID2, close_state := Data5CloseState} = Data5FollowMsg,
     ?assertEqual(ActiveSCID2, Data5SCID2),
@@ -673,3 +679,4 @@ check_all_closed(IDs) ->
     after 10000 ->
               ct:fail("still unclosed ~p", [IDs])
     end.
+

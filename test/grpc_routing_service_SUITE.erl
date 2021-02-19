@@ -221,12 +221,7 @@ init_per_testcase(TestCase, Config) ->
     ]),
 
     %% Wait till the block is gossiped to our local node
-    Chain = blockchain_worker:blockchain(),
-    ok = sibyl_ct_utils:wait_until(fun()->
-        {ok, Height} = blockchain:height(Chain),
-        ct:pal("local height ~p", [Height]),
-        Height == 2
-        end, 100, 100),
+    ok = sibyl_ct_utils:wait_until_local_height(2),
 
     %% setup the grpc connection and open a stream
     {ok, Connection} = grpc_client:connect(tcp, "localhost", 10001),
@@ -292,16 +287,7 @@ routing_updates_with_initial_msg_test(Config) ->
     %% NOTE: the server will send the headers first before any data msg
     %%       but will only send them at the point of the first data msg being sent
     %% the headers will come in first, so assert those
-    {ok, Headers} = sibyl_ct_utils:wait_for(
-        fun() ->
-            case grpc_client:get(Stream) of
-                empty ->
-                    false;
-                {headers, Headers} ->
-                    {true, Headers}
-            end
-        end
-    ),
+    {headers, Headers} = grpc_client:rcv(Stream, 15000),
 
     ct:pal("Response Headers: ~p", [Headers]),
     #{<<":status">> := HttpStatus} = Headers,
@@ -340,11 +326,7 @@ routing_updates_with_initial_msg_test(Config) ->
     ]),
 
     %% Wait till the block is gossiped
-    ok = sibyl_ct_utils:wait_until(fun()->
-        {ok, Height} = blockchain:height(LocalChain),
-        ct:pal("local height ~p", [Height]),
-        Height == 3
-        end, 100, 100),
+    ok = sibyl_ct_utils:wait_until_local_height(3),
 
     %% get expected route data from the ledger to compare against the msg streamed to client
     %% confirm the ledger route has the updated addresses
@@ -379,11 +361,7 @@ routing_updates_with_initial_msg_test(Config) ->
     ]),
 
     %% Wait till the block is gossiped to our local node
-    ok = sibyl_ct_utils:wait_until(fun()->
-        {ok, Height} = blockchain:height(LocalChain),
-        ct:pal("local height ~p", [Height]),
-        Height == 4
-        end, 100, 100),
+    ok = sibyl_ct_utils:wait_until_local_height(4),
 
     %% get expected route data from the ledger to compare against the msg streamed to client
     {ok, ExpRoutes2} = blockchain_ledger_v1:get_routes(LocalLedger),
@@ -455,11 +433,7 @@ routing_updates_without_initial_msg_test(Config) ->
     ]),
 
     %% Wait till the block is gossiped
-    ok = sibyl_ct_utils:wait_until(fun()->
-        {ok, Height} = blockchain:height(LocalChain),
-        ct:pal("local height ~p", [Height]),
-        Height == 3
-        end, 100, 100),
+    ok = sibyl_ct_utils:wait_until_local_height(3),
 
     %% get expected route data from the ledger to compare against the msg streamed to client
     %% confirm the ledger route has the updated addresses

@@ -11,6 +11,7 @@
     wait_until/3,
     wait_until_height/2,
     wait_until_disconnected/2,
+    wait_until_local_height/1,
     wait_for/1, wait_for/3,
     start_node/3,
     partition_cluster/2,
@@ -121,6 +122,18 @@ wait_until_connected(Node1, Node2) ->
         end,
         60 * 2,
         500
+    ).
+
+wait_until_local_height(TargetHeight) ->
+    sibyl_ct_utils:wait_until(
+        fun() ->
+            C = blockchain_worker:blockchain(),
+            {ok, CurHeight} = blockchain:height(C),
+            ct:pal("local height ~p", [CurHeight]),
+            CurHeight == TargetHeight
+        end,
+        30,
+        timer:seconds(1)
     ).
 
 wait_for(Fun) ->
