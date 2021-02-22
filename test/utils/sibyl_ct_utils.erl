@@ -579,7 +579,7 @@ wait_until_height(Node, Height) ->
         fun() ->
             C = ct_rpc:call(Node, blockchain_worker, blockchain, []),
             {ok, CurHeight} = ct_rpc:call(Node, blockchain, height, [C]),
-            ct:pal("local height ~p", [Height]),
+            ct:pal("node ~p height ~p", [Node, CurHeight]),
             CurHeight == Height
         end,
         30,
@@ -734,7 +734,8 @@ add_and_gossip_fake_blocks(NumFakeBlocks, ConsensusMembers, Node, Swarm, Chain, 
     lists:foreach(
         fun(_) ->
             {ok, B} = ct_rpc:call(Node, sibyl_ct_utils, create_block, [ConsensusMembers, []]),
-            _ = ct_rpc:call(Node, blockchain_gossip_handler, add_block, [B, Chain, From, Swarm])
+            _ = ct_rpc:call(Node, blockchain_gossip_handler, add_block, [B, Chain, From, Swarm]),
+            timer:sleep(50)
         end,
         lists:seq(1, NumFakeBlocks)
     ).

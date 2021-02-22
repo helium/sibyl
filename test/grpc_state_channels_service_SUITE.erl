@@ -442,8 +442,8 @@ follow_sc_test(Config) ->
     RouterPubkeyBin = ct_rpc:call(RouterNode, blockchain_swarm, pubkey_bin, []),
 
     %% Get local chain, swarm and pubkey_bin
-    LocalChain = blockchain_worker:blockchain(),
-    LocalSwarm = blockchain_swarm:swarm(),
+    _LocalChain = blockchain_worker:blockchain(),
+    _LocalSwarm = blockchain_swarm:swarm(),
     _LocalPubkeyBin = blockchain_swarm:pubkey_bin(),
 
     %% Check that the meck txn forwarding works
@@ -492,7 +492,7 @@ follow_sc_test(Config) ->
     ]),
 
     %% Wait till the block is gossiped
-    ok = sibyl_ct_utils:wait_until_local_height(2),
+    ok = sibyl_ct_utils:wait_until_height(RouterNode, 2),
 
     %% Checking that state channel got created properly
     {true, SC1} = check_sc_open(RouterNode, RouterChain, RouterPubkeyBin, ID1),
@@ -530,8 +530,11 @@ follow_sc_test(Config) ->
     ok= timer:sleep(timer:seconds(2)),
 
     %% Adding fake blocks to get the state channel 1 to hit the various follow events
+    %% we will push the height 1 block beyond the height at which we expect the event
+    %% to be triggered at
     ok = sibyl_ct_utils:add_and_gossip_fake_blocks(11, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
     %% HEIGHT MARKER -> 13
+    ok = sibyl_ct_utils:wait_until_height(RouterNode, 13),
     ok = sibyl_ct_utils:wait_until_local_height(13),
 
     %% headers are always sent with the first data msg
@@ -540,7 +543,11 @@ follow_sc_test(Config) ->
     #{<<":status">> := Headers0HttpStatus} = Headers0,
     ?assertEqual(Headers0HttpStatus, <<"200">>),
 
+    %%
     %% we should receive 3 stream msgs for SC1, closable, closing and closed
+    %%
+
+    %% closable
     {data, #{height := 13, msg := {follow_streamed_resp, Data0FollowMsg}}} = Data0 = grpc_client:rcv(Stream, 15000),
     ct:pal("Response Data0: ~p", [Data0]),
     #{sc_id := Data0SCID1, close_state := Data0CloseState} = Data0FollowMsg,
@@ -549,52 +556,54 @@ follow_sc_test(Config) ->
 
     %% add additional blocks to trigger the closing state
     ok = sibyl_ct_utils:add_and_gossip_fake_blocks(1, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
-    %% HEIGHT MARKER -> 14
+    ok = sibyl_ct_utils:wait_until_height(RouterNode, 14),
     ok = sibyl_ct_utils:wait_until_local_height(14),
 
+    %% closing
     {data, #{height := 14, msg := {follow_streamed_resp, Data1FollowMsg}}} = Data1 = grpc_client:rcv(Stream, 15000),
     ct:pal("Response Data1: ~p", [Data1]),
     #{sc_id := Data1SCID1, close_state := Data1CloseState} = Data1FollowMsg,
     ?assertEqual(ActiveSCID, Data1SCID1),
     ?assertEqual(closing, Data1CloseState),
 
-    %% add additional blocks to trigger the SC close and thus the closed state
-    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(2, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
-    %% HEIGHT MARKER -> 16
-    ok = sibyl_ct_utils:wait_until_local_height(16),
-
     %% wait until we see a close txn for SC1
-    %% then check for the expected follow msgs
-    %% the msgs will have been sent at different block heights and queued up on the client
+    %% then push it to the router node and have it gossip it around
+    %% this will force the closed event to be triggered at that block height
     receive
         {txn, Txn1} ->
             ?assertEqual(blockchain_txn_state_channel_close_v1, blockchain_txn:type(Txn1)),
             {ok, B1} = ct_rpc:call(RouterNode, sibyl_ct_utils, create_block, [ConsensusMembers, [Txn1]]),
-            _ = ct_rpc:call(RouterNode, blockchain_gossip_handler, add_block, [B1, RouterChain, Self, RouterSwarm]),
-            _ = blockchain_gossip_handler:add_block(B1, LocalChain, Self, LocalSwarm)
+            _ = ct_rpc:call(RouterNode, blockchain_gossip_handler, add_block, [B1, RouterChain, Self, RouterSwarm])
     after 10000 ->
         ct:fail("txn timeout")
     end,
+    %% we expect the closed at block height 15, push 1 beyond and confirm the height in the payload is as expected
+    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(1, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
+    ok = sibyl_ct_utils:wait_until_height(RouterNode, 16),
+    ok = sibyl_ct_utils:wait_until_local_height(16),
 
-    %% HEIGHT MARKER -> 17
-    ok = sibyl_ct_utils:wait_until_local_height(17),
-
-    {data, #{height := 17, msg := {follow_streamed_resp, Data2FollowMsg}}} = Data2 = grpc_client:rcv(Stream, 15000),
+    {data, #{height := 15, msg := {follow_streamed_resp, Data2FollowMsg}}} = Data2 = grpc_client:rcv(Stream, 15000),
     ct:pal("Response Data2: ~p", [Data2]),
     #{sc_id := Data2SCID1, close_state := Data2CloseState} = Data2FollowMsg,
     ?assertEqual(ActiveSCID, Data2SCID1),
     ?assertEqual(closed, Data2CloseState),
 
-    %% confirm SC2 is now the active SC
+    %%
+    %% SC1 is now closed, SC2 should be the active SC
+    %%
     ActiveSCID2 = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, []),
     ct:pal("ActiveSCID2: ~p", [ActiveSCID2]),
     %% check that the ids differ, make sure we have a new SC
     ?assertNotEqual(ActiveSCID, ActiveSCID2),
 
     %% Adding fake blocks to get state channel 2 to expire
-    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(2, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
-    %% HEIGHT MARKER -> 19
+    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(3, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
+    ok = sibyl_ct_utils:wait_until_height(RouterNode, 19),
     ok = sibyl_ct_utils:wait_until_local_height(19),
+
+    %%
+    %% we should receive 3 stream msgs for SC2, closable, closing and closed
+    %%
 
     {data, #{height := 19, msg := {follow_streamed_resp, Data3FollowMsg}}} = Data3 = grpc_client:rcv(Stream, 15000),
     ct:pal("Response Data3: ~p", [Data3]),
@@ -604,6 +613,7 @@ follow_sc_test(Config) ->
 
     ok = sibyl_ct_utils:add_and_gossip_fake_blocks(1, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
     %% HEIGHT MARKER -> 20
+    ok = sibyl_ct_utils:wait_until_height(RouterNode, 20),
     ok = sibyl_ct_utils:wait_until_local_height(20),
 
     {data, #{height := 20, msg := {follow_streamed_resp, Data4FollowMsg}}} = Data4 = grpc_client:rcv(Stream, 15000),
@@ -613,27 +623,22 @@ follow_sc_test(Config) ->
     ?assertEqual(Data4CloseState, closing),
 
     %% wait until we see a close txn for SC2
-    %% then check for the expected follow msgs
-    %% the msgs will have been sent at different block heights and queued up on the client
-
-    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(1, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
-    %% HEIGHT MARKER -> 21
-    ok = sibyl_ct_utils:wait_until_local_height(21),
-
+    %% then push it to the router node and have it gossip it around
+    %% this will force the closed event to be triggered at that block height
     receive
         {txn, Txn2} ->
             ?assertEqual(blockchain_txn_state_channel_close_v1, blockchain_txn:type(Txn2)),
             {ok, B2} = ct_rpc:call(RouterNode, sibyl_ct_utils, create_block, [ConsensusMembers, [Txn2]]),
-            _ = ct_rpc:call(RouterNode, blockchain_gossip_handler, add_block, [B2, RouterChain, Self, RouterSwarm]),
-            _ = blockchain_gossip_handler:add_block(B2, LocalChain, Self, LocalSwarm)
+            _ = ct_rpc:call(RouterNode, blockchain_gossip_handler, add_block, [B2, RouterChain, Self, RouterSwarm])
     after 10000 ->
         ct:fail("txn timeout")
     end,
-
-    %% HEIGHT MARKER -> 22
+    %% we expect the closed at block height 21, push 1 beyond and confirm the height in the payload is as expected
+    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(1, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
+    ok = sibyl_ct_utils:wait_until_height(RouterNode, 22),
     ok = sibyl_ct_utils:wait_until_local_height(22),
 
-    {data, #{height := 22, msg := {follow_streamed_resp, Data5FollowMsg}}} = Data5 = grpc_client:rcv(Stream, 15000),
+    {data, #{height := 21, msg := {follow_streamed_resp, Data5FollowMsg}}} = Data5 = grpc_client:rcv(Stream, 15000),
     ct:pal("Response Data5: ~p", [Data5]),
     #{sc_id := Data5SCID2, close_state := Data5CloseState} = Data5FollowMsg,
     ?assertEqual(ActiveSCID2, Data5SCID2),

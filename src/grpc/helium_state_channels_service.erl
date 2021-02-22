@@ -259,7 +259,8 @@ handle_event(
     %% and send the corresponding closed event to the client
     %% V2 SCs are not deleted from the ledger upon close instead their close_state is updated
     %% for those the commit hooks will generate a PUT event ( handled elsewhere )
-    lager:info("handling delete state channel for ledger key ~p", [LedgerSCID]),
+    {ok, CurHeight} = get_height(),
+    lager:info("handling delete state channel for ledger key ~p at height ~p", [LedgerSCID, CurHeight]),
     #handler_state{sc_closes_sent = SCClosesSent, sc_follows = SCFollows} =
         HandlerState = grpcbox_stream:stream_handler_state(
             StreamState
@@ -268,7 +269,7 @@ handle_event(
     %% and then determine if we need to send an updated msg to the client
     case maps:get(LedgerSCID, SCFollows) of
         {SCMod, SCID, SCExpireAtHeight, SCLastState, SCLastHeight} ->
-            {ok, CurHeight} = get_height(),
+
             {WasSent, NewStreamState, NewClosesSent} = maybe_send_follow_msg(
                 lists:member(SCID, SCClosesSent),
                 SCID,
@@ -322,11 +323,14 @@ handle_event(
                 %% use the ledger key to get the standalone SC ID from our follow list
                 case maps:get(LedgerSCID, SCFollows) of
                     {SCMod, SCID, SCExpireAtHeight, SCLastState, SCLastBlockTime} ->
-                        lager:info("got PUT for V2 SC ~p with close state ~p", [
-                            SCID,
-                            LedgerCloseState
-                        ]),
                         {ok, CurHeight} = get_height(),
+                        lager:info("got PUT for V2 SC ~p with close state ~p at height ~p", [
+                            SCID,
+                            LedgerCloseState,
+                            CurHeight
+
+                        ]),
+
                         {WasSent, NewStreamState, NewClosesSent} = maybe_send_follow_msg(
                             lists:member(SCID, SCClosesSent),
                             SCID,
