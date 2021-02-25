@@ -35,7 +35,6 @@
     setup_meck_txn_forwarding/2,
     get_consensus_members/2,
     check_genesis_block/2
-
 ]).
 
 create_block(ConsensusMembers, Txs) ->
@@ -338,33 +337,35 @@ init_per_testcase(TestCase, Config) ->
             ]),
 
             %% set grpcbox configuration
-            ct_rpc:call(Node, application, set_env, [grpcbox, servers,
-                        [
-                            #{
-                                grpc_opts => #{
-                                    service_protos => [gateway_pb],
-                                    services => #{
-                                        'helium.gateway_routing' => helium_routing_service,
-                                        'helium.gateway_state_channels' => helium_state_channels_service
-                                    }
-                                },
-                                transport_opts => #{ssl => false},
-                                listen_opts => #{
-                                    port => 10001,
-                                    ip => {0, 0, 0, 0}
-                                },
-                                pool_opts => #{size => 2},
-                                server_opts => #{
-                                    header_table_size => 4096,
-                                    enable_push => 1,
-                                    max_concurrent_streams => unlimited,
-                                    initial_window_size => 65535,
-                                    max_frame_size => 16384,
-                                    max_header_list_size => unlimited
-                                }
+            ct_rpc:call(Node, application, set_env, [
+                grpcbox,
+                servers,
+                [
+                    #{
+                        grpc_opts => #{
+                            service_protos => [gateway_pb],
+                            services => #{
+                                'helium.gateway_routing' => helium_routing_service,
+                                'helium.gateway_state_channels' => helium_state_channels_service
                             }
-                        ]
-                ]),
+                        },
+                        transport_opts => #{ssl => false},
+                        listen_opts => #{
+                            port => 10001,
+                            ip => {0, 0, 0, 0}
+                        },
+                        pool_opts => #{size => 2},
+                        server_opts => #{
+                            header_table_size => 4096,
+                            enable_push => 1,
+                            max_concurrent_streams => unlimited,
+                            initial_window_size => 65535,
+                            max_frame_size => 16384,
+                            max_header_list_size => unlimited
+                        }
+                    }
+                ]
+            ]),
 
             {ok, StartedApps} = ct_rpc:call(Node, application, ensure_all_started, [blockchain]),
             ct:pal("Node: ~p, StartedApps: ~p", [Node, StartedApps])
@@ -658,8 +659,6 @@ destroy_ledger() ->
             ok
     end.
 
-
-
 check_genesis_block(Config, GenesisBlock) ->
     Nodes = ?config(nodes, Config),
     lists:foreach(
@@ -725,7 +724,6 @@ create_oui_txn(OUI, RouterNode, EUIs, SubnetSize) ->
     OUITxn = blockchain_txn_oui_v1:new(OUI, RouterPubkeyBin, [RouterPubkeyBin], Filter, SubnetSize),
     blockchain_txn_oui_v1:sign(OUITxn, RouterSigFun).
 
-
 add_block(RouterNode, RouterChain, ConsensusMembers, Txns) ->
     ct:pal("RouterChain: ~p", [RouterChain]),
     ct_rpc:call(RouterNode, sibyl_ct_utils, create_block, [ConsensusMembers, Txns]).
@@ -770,14 +768,15 @@ make_block(Blockchain, ConsensusMembers, STxs, Override) ->
 
 signatures(ConsensusMembers, BinBlock) ->
     lists:foldl(
-      fun({A, {_, _, F}}, Acc) ->
-              Sig = F(BinBlock),
-              [{A, Sig}|Acc];
-         %% NOTE: This clause matches the consensus members generated for the dist suite
-         ({A, _, F}, Acc) ->
-              Sig = F(BinBlock),
-              [{A, Sig}|Acc]
-      end
-      ,[]
-      ,ConsensusMembers
-     ).
+        fun
+            ({A, {_, _, F}}, Acc) ->
+                Sig = F(BinBlock),
+                [{A, Sig} | Acc];
+            %% NOTE: This clause matches the consensus members generated for the dist suite
+            ({A, _, F}, Acc) ->
+                Sig = F(BinBlock),
+                [{A, Sig} | Acc]
+        end,
+        [],
+        ConsensusMembers
+    ).
