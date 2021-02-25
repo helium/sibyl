@@ -15,8 +15,6 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
-
-%%-include("../include/sibyl.hrl").
 -include("../src/grpc/autogen/server/gateway_pb.hrl").
 
 %%--------------------------------------------------------------------
@@ -50,11 +48,13 @@ init_per_testcase(TestCase, Config) ->
     Nodes = ?config(nodes, InitConfig),
 
     LogDir = ?config(log_dir, InitConfig0),
-    lager:set_loglevel(lager_console_backend, debug),
-    lager:set_loglevel({lager_file_backend, LogDir}, debug),
+    lager:set_loglevel(lager_console_backend, info),
+    lager:set_loglevel({lager_file_backend, LogDir}, info),
 
     %% start a local blockchain
-    #{public := LocalNodePubKey, secret := LocalNodePrivKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{public := LocalNodePubKey, secret := LocalNodePrivKey} = libp2p_crypto:generate_keys(
+        ecc_compact
+    ),
     BaseDir = ?config(base_dir, InitConfig),
     LocalNodeSigFun = libp2p_crypto:mk_sig_fun(LocalNodePrivKey),
     LocalNodeECDHFun = libp2p_crypto:mk_ecdh_fun(LocalNodePrivKey),
@@ -173,12 +173,16 @@ init_per_testcase(TestCase, Config) ->
         Nodes
     ),
     %% wait until the local node has the genesis block
-    ok = sibyl_ct_utils:wait_until(fun() ->
+    ok = sibyl_ct_utils:wait_until(
+        fun() ->
             C0 = blockchain_worker:blockchain(),
             {ok, Height} = blockchain:height(C0),
             ct:pal("local node height ~p", [Height]),
             Height == 1
-        end, 100, 100),
+        end,
+        100,
+        100
+    ),
 
     ok = sibyl_ct_utils:check_genesis_block(InitConfig, GenesisBlock),
     ConsensusMembers = sibyl_ct_utils:get_consensus_members(InitConfig, ConsensusAddrs),
@@ -196,13 +200,6 @@ init_per_testcase(TestCase, Config) ->
     RouterChain = ct_rpc:call(RouterNode, blockchain_worker, blockchain, []),
     RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, swarm, []),
 
-    %% setup the meck txn forwarding
-    Self = self(),
-    ok = sibyl_ct_utils:setup_meck_txn_forwarding(RouterNode, Self),
-
-    %% do same mecking for the local node
-    ok = meck_test_util:forward_submit_txn(self()),
-
     %% Create OUI txn
     SignedOUITxn = sibyl_ct_utils:create_oui_txn(1, RouterNode, [], 8),
     ct:pal("SignedOUITxn: ~p", [SignedOUITxn]),
@@ -212,15 +209,15 @@ init_per_testcase(TestCase, Config) ->
     ]),
     ct:pal("Block0: ~p", [Block0]),
 
-    %% Fake gossip block
     ok = ct_rpc:call(RouterNode, blockchain_gossip_handler, add_block, [
         Block0,
         RouterChain,
-        Self,
+        self(),
         RouterSwarm
     ]),
 
     %% Wait till the block is gossiped to our local node
+    ok = sibyl_ct_utils:wait_until_height(RouterNode, 2),
     ok = sibyl_ct_utils:wait_until_local_height(2),
 
     %% setup the grpc connection and open a stream
@@ -272,12 +269,13 @@ routing_updates_with_initial_msg_test(Config) ->
 
     %% Get router chain, swarm and pubkey_bin
     RouterChain = ct_rpc:call(RouterNode1, blockchain_worker, blockchain, []),
-    RouterSwarm = ct_rpc:call(RouterNode1, blockchain_swarm, swarm, []),
+    _RouterSwarm = ct_rpc:call(RouterNode1, blockchain_swarm, swarm, []),
 
     LocalChain = blockchain_worker:blockchain(),
     LocalLedger = blockchain:ledger(LocalChain),
 
     %% send the initial msg from the client with its safe height value
+    %% current height is 2
     grpc_client:send(Stream, #{height => 1}),
 
     %% we expect to receive a response containing all the added routes from the init_per_testcase step
@@ -287,8 +285,7 @@ routing_updates_with_initial_msg_test(Config) ->
     %% NOTE: the server will send the headers first before any data msg
     %%       but will only send them at the point of the first data msg being sent
     %% the headers will come in first, so assert those
-    {headers, Headers} = grpc_client:rcv(Stream, 15000),
-
+    {headers, Headers} = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Headers: ~p", [Headers]),
     #{<<":status">> := HttpStatus} = Headers,
     ?assertEqual(HttpStatus, <<"200">>),
@@ -309,7 +306,8 @@ routing_updates_with_initial_msg_test(Config) ->
     RouterPubkeyBin2 = ct_rpc:call(RouterNode2, blockchain_swarm, pubkey_bin, []),
     NewAddresses1 = [RouterPubkeyBin2],
     ct:pal("New Addressses1: ~p", [NewAddresses1]),
-    UpdateOUITxn1 = update_oui_address_txn(1, RouterNode1, NewAddresses1, 1),
+    UpdateOUITxn1 = update_oui_address_txn(1, RouterNode1, NewAddresses1, 2),
+    ct:pal("Updateed OUI txn: ~p", [UpdateOUITxn1]),
 
     %% Add block with oui
     {ok, Block1} = sibyl_ct_utils:add_block(RouterNode1, RouterChain, ConsensusMembers, [
@@ -317,15 +315,11 @@ routing_updates_with_initial_msg_test(Config) ->
     ]),
     ct:pal("Block1: ~p", [Block1]),
 
-    %% Fake gossip block
-    ok = ct_rpc:call(RouterNode1, blockchain_gossip_handler, add_block, [
-        Block1,
-        RouterChain,
-        self(),
-        RouterSwarm
-    ]),
+    %% gossip block
+    _ = blockchain_gossip_handler:add_block(Block1, LocalChain, self(), blockchain_swarm:swarm()),
 
     %% Wait till the block is gossiped
+    ok = sibyl_ct_utils:wait_until_height(RouterNode1, 3),
     ok = sibyl_ct_utils:wait_until_local_height(3),
 
     %% get expected route data from the ledger to compare against the msg streamed to client
@@ -335,8 +329,8 @@ routing_updates_with_initial_msg_test(Config) ->
     ?assertEqual(blockchain_ledger_routing_v1:addresses(ExpRoute1), NewAddresses1),
 
     %% confirm the received routes matches that in the ledger
-    {data, Routes1} = grpc_client:rcv(Stream, 15000),
-    ct:pal("Route Update: ~p", [Routes1]),
+    {data, Routes1} = grpc_client:rcv(Stream, 5000),
+    ct:pal("Route Update 1: ~p", [Routes1]),
     assert_route_update(Routes1, ExpRoutes1),
 
     %%
@@ -344,7 +338,7 @@ routing_updates_with_initial_msg_test(Config) ->
     %%
 
     %% Create the OUI txn
-    SignedOUI2Txn = sibyl_ct_utils:create_oui_txn(2, RouterNode1, [], 8),
+    SignedOUI2Txn = sibyl_ct_utils:create_oui_txn(3, RouterNode1, [], 8),
     ct:pal("SignedOUI2Txn: ~p", [SignedOUI2Txn]),
     %% Add block with oui
     {ok, Block2} = sibyl_ct_utils:add_block(RouterNode1, RouterChain, ConsensusMembers, [
@@ -352,23 +346,19 @@ routing_updates_with_initial_msg_test(Config) ->
     ]),
     ct:pal("Block2: ~p", [Block2]),
 
-    %% Fake gossip block
-    ok = ct_rpc:call(RouterNode1, blockchain_gossip_handler, add_block, [
-        Block2,
-        RouterChain,
-        self(),
-        RouterSwarm
-    ]),
+    %% gossip block
+    _ = blockchain_gossip_handler:add_block(Block2, LocalChain, self(), blockchain_swarm:swarm()),
 
     %% Wait till the block is gossiped to our local node
+    ok = sibyl_ct_utils:wait_until_height(RouterNode1, 4),
     ok = sibyl_ct_utils:wait_until_local_height(4),
 
     %% get expected route data from the ledger to compare against the msg streamed to client
     {ok, ExpRoutes2} = blockchain_ledger_v1:get_routes(LocalLedger),
-    ct:pal("Expected routes 1 ~p", [ExpRoutes2]),
+    ct:pal("Expected routes 2 ~p", [ExpRoutes2]),
 
-    {data, Routes2} = grpc_client:rcv(Stream, 15000),
-    ct:pal("Route Update: ~p", [Routes2]),
+    {data, Routes2} = grpc_client:rcv(Stream, 5000),
+    ct:pal("Route Update 2: ~p", [Routes2]),
     assert_route_update(Routes2, ExpRoutes2),
 
     grpc_client:stop_stream(Stream),
@@ -390,18 +380,17 @@ routing_updates_without_initial_msg_test(Config) ->
 
     %% Get router chain, swarm and pubkey_bin
     RouterChain = ct_rpc:call(RouterNode1, blockchain_worker, blockchain, []),
-    RouterSwarm = ct_rpc:call(RouterNode1, blockchain_swarm, swarm, []),
+    _RouterSwarm = ct_rpc:call(RouterNode1, blockchain_swarm, swarm, []),
 
     LocalChain = blockchain_worker:blockchain(),
     LocalLedger = blockchain:ledger(LocalChain),
 
-    %% get current height and add 1 and use for client header
+    %% get current height
     {ok, CurHeight0} = blockchain:height(LocalChain),
     ct:pal("curheight0: ~p", [CurHeight0]),
-    ClientHeaderHeight = CurHeight0 + 1,
 
     %% send the initial msg from the client with its safe height value
-    grpc_client:send(Stream, #{height => ClientHeaderHeight}),
+    grpc_client:send(Stream, #{height => CurHeight0}),
 
     %% we do not expect to receive a response containing all the added routes from the init_per_testcase step
     %% this is because the client supplied a height value greater than the height at which routes were last modified
@@ -416,7 +405,7 @@ routing_updates_without_initial_msg_test(Config) ->
     RouterPubkeyBin2 = ct_rpc:call(RouterNode2, blockchain_swarm, pubkey_bin, []),
     NewAddresses1 = [RouterPubkeyBin2],
     ct:pal("New Addressses1: ~p", [NewAddresses1]),
-    UpdateOUITxn1 = update_oui_address_txn(1, RouterNode1, NewAddresses1, 1),
+    UpdateOUITxn1 = update_oui_address_txn(1, RouterNode1, NewAddresses1, 2),
 
     %% Add block with oui
     {ok, Block1} = sibyl_ct_utils:add_block(RouterNode1, RouterChain, ConsensusMembers, [
@@ -424,15 +413,11 @@ routing_updates_without_initial_msg_test(Config) ->
     ]),
     ct:pal("Block1: ~p", [Block1]),
 
-    %% Fake gossip block
-    ok = ct_rpc:call(RouterNode1, blockchain_gossip_handler, add_block, [
-        Block1,
-        RouterChain,
-        self(),
-        RouterSwarm
-    ]),
+    %% gossip block
+    _ = blockchain_gossip_handler:add_block(Block1, LocalChain, self(), blockchain_swarm:swarm()),
 
     %% Wait till the block is gossiped
+    ok = sibyl_ct_utils:wait_until_height(RouterNode1, 3),
     ok = sibyl_ct_utils:wait_until_local_height(3),
 
     %% get expected route data from the ledger to compare against the msg streamed to client
@@ -444,13 +429,13 @@ routing_updates_without_initial_msg_test(Config) ->
     %% NOTE: the server will send the headers first before any data msg
     %%       but will only send them at the point of the first data msg being sent
     %% the headers will come in first, so assert those
-    {headers, Headers1} = grpc_client:rcv(Stream, 15000),
+    {headers, Headers1} = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Headers: ~p", [Headers1]),
     #{<<":status">> := HttpStatus} = Headers1,
     ?assertEqual(HttpStatus, <<"200">>),
 
     %% confirm the received routes matches that in the ledger
-    {data, Routes1} = grpc_client:rcv(Stream, 15000),
+    {data, Routes1} = grpc_client:rcv(Stream, 5000),
     ct:pal("Route Update: ~p", [Routes1]),
     assert_route_update(Routes1, ExpRoutes1),
 
@@ -510,11 +495,13 @@ validate_address(ExpectedRouterPubKeyAddresses, #{pub_key := PubKey, uri := URI}
     ?assert(is_integer(Port)),
     ?assert((Scheme =:= <<"http">> orelse Scheme =:= <<"https">>)).
 
-
 update_oui_address_txn(OUI, RouterNode, NewAddresses, Nonce) ->
     {ok, RouterPubkey, RouterSigFun, _} = ct_rpc:call(RouterNode, blockchain_swarm, keys, []),
     RouterPubkeyBin = libp2p_crypto:pubkey_to_bin(RouterPubkey),
-    OUITxn1 = blockchain_txn_routing_v1:update_router_addresses(OUI, RouterPubkeyBin, NewAddresses, Nonce),
+    OUITxn1 = blockchain_txn_routing_v1:update_router_addresses(
+        OUI,
+        RouterPubkeyBin,
+        NewAddresses,
+        Nonce
+    ),
     blockchain_txn_routing_v1:sign(OUITxn1, RouterSigFun).
-
-

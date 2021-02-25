@@ -53,6 +53,7 @@ init_per_testcase(TestCase, Config) ->
 
     application:ensure_all_started(lager),
     application:ensure_all_started(erlbus),
+    application:ensure_all_started(grpc_client),
     application:ensure_all_started(grpcbox),
 
     InitConfig = sibyl_ct_utils:init_per_testcase(TestCase, InitConfig0),
@@ -63,7 +64,9 @@ init_per_testcase(TestCase, Config) ->
     lager:set_loglevel({lager_file_backend, LogDir}, debug),
 
     %% start a local blockchain
-    #{public := LocalNodePubKey, secret := LocalNodePrivKey} = libp2p_crypto:generate_keys(ecc_compact),
+    #{public := LocalNodePubKey, secret := LocalNodePrivKey} = libp2p_crypto:generate_keys(
+        ecc_compact
+    ),
     BaseDir = ?config(base_dir, InitConfig),
     LocalNodeSigFun = libp2p_crypto:mk_sig_fun(LocalNodePrivKey),
     LocalNodeECDHFun = libp2p_crypto:mk_ecdh_fun(LocalNodePrivKey),
@@ -215,9 +218,12 @@ init_per_testcase(TestCase, Config) ->
 end_per_testcase(TestCase, Config) ->
     Connection = ?config(grpc_connection, Config),
     grpc_client:stop_connection(Connection),
+    BlockchainSup = ?config(sup, Config),
     SibylSup = ?config(sibyl_sup, Config),
     application:stop(erlbus),
     application:stop(grpcbox),
+    application:stop(grpc_client),
+    true = erlang:exit(BlockchainSup, normal),
     true = erlang:exit(SibylSup, normal),
     sibyl_ct_utils:end_per_testcase(TestCase, Config).
 
@@ -370,7 +376,7 @@ close_sc_test(Config) ->
     ]),
 
     %% Wait till the block is gossiped
-   ok = sibyl_ct_utils:wait_until_local_height(2),
+    ok = sibyl_ct_utils:wait_until_local_height(2),
 
     %% Checking that state channel got created properly
     {true, _SC1} = check_sc_open(RouterNode, RouterChain, RouterPubkeyBin, ID),
@@ -402,7 +408,14 @@ close_sc_test(Config) ->
     SignedTxnMap2 = SignedTxnMap#{state_channel := SignedSCCloseMap},
 
     %% use the grpc APIs to close the SC
-    {ok, #{headers := Headers, result := #{msg := {close_resp, ResponseMsg}, height := _ResponseHeight, signature := _ResponseSig} = Result}} = grpc_client:unary(
+    {ok, #{
+        headers := Headers,
+        result := #{
+            msg := {close_resp, ResponseMsg},
+            height := _ResponseHeight,
+            signature := _ResponseSig
+        } = Result
+    }} = grpc_client:unary(
         Connection,
         #{close_txn => SignedTxnMap2},
         'helium.gateway_state_channels',
@@ -480,7 +493,6 @@ follow_sc_test(Config) ->
         SignedSCOpenTxn1,
         SignedOUI2Txn,
         SignedSCOpenTxn2
-
     ]),
     ct:pal("Block0: ~p", [Block0]),
     %% Fake gossip block
@@ -493,6 +505,7 @@ follow_sc_test(Config) ->
 
     %% Wait till the block is gossiped
     ok = sibyl_ct_utils:wait_until_height(RouterNode, 2),
+    ok = sibyl_ct_utils:wait_until_local_height(2),
 
     %% Checking that state channel got created properly
     {true, SC1} = check_sc_open(RouterNode, RouterChain, RouterPubkeyBin, ID1),
@@ -525,14 +538,27 @@ follow_sc_test(Config) ->
 
     %% setup the follows for the two SCs
     ?assertEqual(ID1, ActiveSCID),
-    ok = grpc_client:send(Stream, #{sc_id => ID1, owner => blockchain_ledger_state_channel_v1:owner(SC1)}),
-    ok = grpc_client:send(Stream, #{sc_id => ID2, owner => blockchain_ledger_state_channel_v1:owner(SC2)}),
-    ok= timer:sleep(timer:seconds(2)),
+    ok = grpc_client:send(Stream, #{
+        sc_id => ID1,
+        owner => blockchain_ledger_state_channel_v1:owner(SC1)
+    }),
+    ok = grpc_client:send(Stream, #{
+        sc_id => ID2,
+        owner => blockchain_ledger_state_channel_v1:owner(SC2)
+    }),
+    ok = timer:sleep(timer:seconds(2)),
 
     %% Adding fake blocks to get the state channel 1 to hit the various follow events
     %% we will push the height 1 block beyond the height at which we expect the event
     %% to be triggered at
-    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(11, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
+    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(
+        11,
+        ConsensusMembers,
+        RouterNode,
+        RouterSwarm,
+        RouterChain,
+        Self
+    ),
     %% HEIGHT MARKER -> 13
     ok = sibyl_ct_utils:wait_until_height(RouterNode, 13),
     ok = sibyl_ct_utils:wait_until_local_height(13),
@@ -548,19 +574,28 @@ follow_sc_test(Config) ->
     %%
 
     %% closable
-    {data, #{height := 13, msg := {follow_streamed_resp, Data0FollowMsg}}} = Data0 = grpc_client:rcv(Stream, 15000),
+    {data, #{height := 13, msg := {follow_streamed_resp, Data0FollowMsg}}} =
+        Data0 = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Data0: ~p", [Data0]),
     #{sc_id := Data0SCID1, close_state := Data0CloseState} = Data0FollowMsg,
     ?assertEqual(ActiveSCID, Data0SCID1),
     ?assertEqual(closable, Data0CloseState),
 
     %% add additional blocks to trigger the closing state
-    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(1, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
+    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(
+        1,
+        ConsensusMembers,
+        RouterNode,
+        RouterSwarm,
+        RouterChain,
+        Self
+    ),
     ok = sibyl_ct_utils:wait_until_height(RouterNode, 14),
     ok = sibyl_ct_utils:wait_until_local_height(14),
 
     %% closing
-    {data, #{height := 14, msg := {follow_streamed_resp, Data1FollowMsg}}} = Data1 = grpc_client:rcv(Stream, 15000),
+    {data, #{height := 14, msg := {follow_streamed_resp, Data1FollowMsg}}} =
+        Data1 = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Data1: ~p", [Data1]),
     #{sc_id := Data1SCID1, close_state := Data1CloseState} = Data1FollowMsg,
     ?assertEqual(ActiveSCID, Data1SCID1),
@@ -572,17 +607,32 @@ follow_sc_test(Config) ->
     receive
         {txn, Txn1} ->
             ?assertEqual(blockchain_txn_state_channel_close_v1, blockchain_txn:type(Txn1)),
-            {ok, B1} = ct_rpc:call(RouterNode, sibyl_ct_utils, create_block, [ConsensusMembers, [Txn1]]),
-            _ = ct_rpc:call(RouterNode, blockchain_gossip_handler, add_block, [B1, RouterChain, Self, RouterSwarm])
-    after 10000 ->
-        ct:fail("txn timeout")
+            {ok, B1} = ct_rpc:call(RouterNode, sibyl_ct_utils, create_block, [
+                ConsensusMembers,
+                [Txn1]
+            ]),
+            _ = ct_rpc:call(RouterNode, blockchain_gossip_handler, add_block, [
+                B1,
+                RouterChain,
+                Self,
+                RouterSwarm
+            ])
+    after 10000 -> ct:fail("txn timeout")
     end,
     %% we expect the closed at block height 15, push 1 beyond and confirm the height in the payload is as expected
-    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(1, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
+    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(
+        1,
+        ConsensusMembers,
+        RouterNode,
+        RouterSwarm,
+        RouterChain,
+        Self
+    ),
     ok = sibyl_ct_utils:wait_until_height(RouterNode, 16),
     ok = sibyl_ct_utils:wait_until_local_height(16),
 
-    {data, #{height := 15, msg := {follow_streamed_resp, Data2FollowMsg}}} = Data2 = grpc_client:rcv(Stream, 15000),
+    {data, #{height := 15, msg := {follow_streamed_resp, Data2FollowMsg}}} =
+        Data2 = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Data2: ~p", [Data2]),
     #{sc_id := Data2SCID1, close_state := Data2CloseState} = Data2FollowMsg,
     ?assertEqual(ActiveSCID, Data2SCID1),
@@ -597,7 +647,14 @@ follow_sc_test(Config) ->
     ?assertNotEqual(ActiveSCID, ActiveSCID2),
 
     %% Adding fake blocks to get state channel 2 to expire
-    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(3, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
+    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(
+        3,
+        ConsensusMembers,
+        RouterNode,
+        RouterSwarm,
+        RouterChain,
+        Self
+    ),
     ok = sibyl_ct_utils:wait_until_height(RouterNode, 19),
     ok = sibyl_ct_utils:wait_until_local_height(19),
 
@@ -605,18 +662,27 @@ follow_sc_test(Config) ->
     %% we should receive 3 stream msgs for SC2, closable, closing and closed
     %%
 
-    {data, #{height := 19, msg := {follow_streamed_resp, Data3FollowMsg}}} = Data3 = grpc_client:rcv(Stream, 15000),
+    {data, #{height := 19, msg := {follow_streamed_resp, Data3FollowMsg}}} =
+        Data3 = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Data3: ~p", [Data3]),
     #{sc_id := Data3SCID2, close_state := Data3CloseState} = Data3FollowMsg,
     ?assertEqual(ActiveSCID2, Data3SCID2),
     ?assertEqual(Data3CloseState, closable),
 
-    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(1, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
+    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(
+        1,
+        ConsensusMembers,
+        RouterNode,
+        RouterSwarm,
+        RouterChain,
+        Self
+    ),
     %% HEIGHT MARKER -> 20
     ok = sibyl_ct_utils:wait_until_height(RouterNode, 20),
     ok = sibyl_ct_utils:wait_until_local_height(20),
 
-    {data, #{height := 20, msg := {follow_streamed_resp, Data4FollowMsg}}} = Data4 = grpc_client:rcv(Stream, 15000),
+    {data, #{height := 20, msg := {follow_streamed_resp, Data4FollowMsg}}} =
+        Data4 = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Data4: ~p", [Data4]),
     #{sc_id := Data4SCID2, close_state := Data4CloseState} = Data4FollowMsg,
     ?assertEqual(ActiveSCID2, Data4SCID2),
@@ -628,24 +694,38 @@ follow_sc_test(Config) ->
     receive
         {txn, Txn2} ->
             ?assertEqual(blockchain_txn_state_channel_close_v1, blockchain_txn:type(Txn2)),
-            {ok, B2} = ct_rpc:call(RouterNode, sibyl_ct_utils, create_block, [ConsensusMembers, [Txn2]]),
-            _ = ct_rpc:call(RouterNode, blockchain_gossip_handler, add_block, [B2, RouterChain, Self, RouterSwarm])
-    after 10000 ->
-        ct:fail("txn timeout")
+            {ok, B2} = ct_rpc:call(RouterNode, sibyl_ct_utils, create_block, [
+                ConsensusMembers,
+                [Txn2]
+            ]),
+            _ = ct_rpc:call(RouterNode, blockchain_gossip_handler, add_block, [
+                B2,
+                RouterChain,
+                Self,
+                RouterSwarm
+            ])
+    after 10000 -> ct:fail("txn timeout")
     end,
     %% we expect the closed at block height 21, push 1 beyond and confirm the height in the payload is as expected
-    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(1, ConsensusMembers, RouterNode, RouterSwarm, RouterChain, Self),
+    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(
+        1,
+        ConsensusMembers,
+        RouterNode,
+        RouterSwarm,
+        RouterChain,
+        Self
+    ),
     ok = sibyl_ct_utils:wait_until_height(RouterNode, 22),
     ok = sibyl_ct_utils:wait_until_local_height(22),
 
-    {data, #{height := 21, msg := {follow_streamed_resp, Data5FollowMsg}}} = Data5 = grpc_client:rcv(Stream, 15000),
+    {data, #{height := 21, msg := {follow_streamed_resp, Data5FollowMsg}}} =
+        Data5 = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Data5: ~p", [Data5]),
     #{sc_id := Data5SCID2, close_state := Data5CloseState} = Data5FollowMsg,
     ?assertEqual(ActiveSCID2, Data5SCID2),
     ?assertEqual(Data5CloseState, closed),
 
     ok.
-
 
 %
 %% ------------------------------------------------------------------
@@ -680,8 +760,13 @@ check_all_closed([]) ->
 check_all_closed(IDs) ->
     receive
         {txn, Txn} ->
-            check_all_closed([ ID || ID <- IDs, ID /= blockchain_state_channel_v1:id(blockchain_txn_state_channel_close_v1:state_channel(Txn)) ])
-    after 10000 ->
-              ct:fail("still unclosed ~p", [IDs])
+            check_all_closed([
+                ID
+                || ID <- IDs,
+                   ID /=
+                       blockchain_state_channel_v1:id(
+                           blockchain_txn_state_channel_close_v1:state_channel(Txn)
+                       )
+            ])
+    after 10000 -> ct:fail("still unclosed ~p", [IDs])
     end.
-
