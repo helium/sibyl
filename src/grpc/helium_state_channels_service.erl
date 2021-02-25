@@ -124,27 +124,22 @@ is_valid(undefined = _Chain, _Ctx, #gateway_sc_is_valid_req_v1_pb{} = _Msg) ->
 is_valid(Chain, Ctx, #gateway_sc_is_valid_req_v1_pb{sc = SC} = _Message) ->
     lager:info("executing RPC is_valid with msg ~p", [_Message]),
     SCID = blockchain_state_channel_v1:id(SC),
-    lager:info("*** point 1", []),
     {ok, CurHeight} = get_height(),
-    lager:info("*** point 2", []),
     {IsValid, Msg} =
         case is_valid_sc(SC, Chain) of
             {false, Reason} -> {false, Reason};
             true -> {true, <<>>}
         end,
-    lager:info("*** point 3", []),
     Response0 = #gateway_sc_is_valid_resp_v1_pb{
         valid = IsValid,
         reason = sibyl_utils:ensure(binary, Msg),
         sc_id = SCID
     },
-    lager:info("*** point 4", []),
     Response1 = sibyl_utils:encode_gateway_resp_v1(
         Response0,
         CurHeight,
         sibyl_mgr:sigfun()
     ),
-    lager:info("*** point 5 ~p", [Response1]),
     {ok, Response1, Ctx}.
 
 -spec close(
@@ -176,7 +171,7 @@ close(_Chain, Ctx, #gateway_sc_close_req_v1_pb{close_txn = CloseTxn} = _Message)
     boolean(),
     gateway_pb:gateway_follow_req_v1_pb(),
     grpcbox_stream:t()
-) -> {continue, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
+) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 follow(
     undefined = _Chain,
     _IsAlreadyFolowing,
@@ -238,11 +233,11 @@ follow(
         SCGrace,
         NewStreamState0
     ),
-    {continue, NewStreamState1};
+    {ok, NewStreamState1};
 follow(_Chain, true = _IsAlreadyFolowing, #gateway_sc_follow_req_v1_pb{} = _Msg, StreamState) ->
     %% we are already following this SC - ignore
     lager:info("ignoring dup follow. Msg ~p", [_Msg]),
-    {continue, StreamState}.
+    {ok, StreamState}.
 
 %% ------------------------------------------------------------------
 %% Internal functions
@@ -260,7 +255,10 @@ handle_event(
     %% V2 SCs are not deleted from the ledger upon close instead their close_state is updated
     %% for those the commit hooks will generate a PUT event ( handled elsewhere )
     {ok, CurHeight} = get_height(),
-    lager:info("handling delete state channel for ledger key ~p at height ~p", [LedgerSCID, CurHeight]),
+    lager:info("handling delete state channel for ledger key ~p at height ~p", [
+        LedgerSCID,
+        CurHeight
+    ]),
     #handler_state{sc_closes_sent = SCClosesSent, sc_follows = SCFollows} =
         HandlerState = grpcbox_stream:stream_handler_state(
             StreamState
@@ -269,7 +267,6 @@ handle_event(
     %% and then determine if we need to send an updated msg to the client
     case maps:get(LedgerSCID, SCFollows) of
         {SCMod, SCID, SCExpireAtHeight, SCLastState, SCLastHeight} ->
-
             {WasSent, NewStreamState, NewClosesSent} = maybe_send_follow_msg(
                 lists:member(SCID, SCClosesSent),
                 SCID,
@@ -328,7 +325,6 @@ handle_event(
                             SCID,
                             LedgerCloseState,
                             CurHeight
-
                         ]),
 
                         {WasSent, NewStreamState, NewClosesSent} = maybe_send_follow_msg(

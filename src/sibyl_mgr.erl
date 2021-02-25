@@ -121,7 +121,7 @@ make_ets_table() ->
 %% ------------------------------------------------------------------
 init(Args) ->
     process_flag(trap_exit, true),
-    lager:info("init with args ~p", [Args]),
+    lager:debug("init with args ~p", [Args]),
     TID =
         case proplists:get_value(ets, Args) of
             undefined ->
@@ -186,6 +186,10 @@ handle_info(
         CurHeight,
         sibyl_mgr:sigfun()
     ),
+    lager:debug("got routing update end event at height ~p.  Publishing routing update msg ~p", [
+        CurHeight,
+        Msg1
+    ]),
     erlbus:pub(
         ?EVENT_ROUTING_UPDATE,
         sibyl_utils:make_event(?EVENT_ROUTING_UPDATE, Msg1)
@@ -222,13 +226,13 @@ add_commit_hooks() ->
     %% and those updates for the current block have *all* been applied
     RouteUpdatesEndFun = fun
         (?ROUTING_CF_NAME = _CFName) ->
-            lager:info("publishing routing updates end event", []),
+            lager:debug("publishing routing updates end event", []),
             erlbus:pub(
                 ?EVENT_ROUTING_UPDATES_END,
                 sibyl_utils:make_event(?EVENT_ROUTING_UPDATES_END)
             );
         (_CFName) ->
-            lager:info("bad cf name ~p", [_CFName]),
+            lager:debug("bad cf name ~p", [_CFName]),
             noop
     end,
     RoutingRef = blockchain_worker:add_commit_hook(
@@ -243,7 +247,7 @@ add_commit_hooks() ->
         ([{_CF, put, Key, Value}]) ->
             %% note: the key will be a combo of <<owner, sc_id>>
             SCTopic = sibyl_utils:make_sc_topic(Key),
-            lager:info("publishing SC delete event for key ~p and topic ~p", [Key, SCTopic]),
+            lager:debug("publishing SC delete event for key ~p and topic ~p", [Key, SCTopic]),
             erlbus:pub(
                 SCTopic,
                 sibyl_utils:make_event(SCTopic, {put, Key, Value})
@@ -251,13 +255,13 @@ add_commit_hooks() ->
         ([{_CF, delete, Key}]) ->
             %% note: the key will be a combo of <<owner, sc_id>>
             SCTopic = sibyl_utils:make_sc_topic(Key),
-            lager:info("publishing SC delete event for key ~p and topic ~p", [Key, SCTopic]),
+            lager:debug("publishing SC delete event for key ~p and topic ~p", [Key, SCTopic]),
             erlbus:pub(
                 SCTopic,
                 sibyl_utils:make_event(SCTopic, {delete, Key})
             );
         (_Other) ->
-            lager:info("got unknown event for SC ~p", [_Other]),
+            lager:debug("got unknown event for SC ~p", [_Other]),
             noop
     end,
     %% we do NOT want to be receive events of when there have been state channels updates
@@ -269,7 +273,7 @@ add_commit_hooks() ->
         SCUpdateIncrementalFun,
         SCUpdatesEndFun
     ),
-    lager:info("*** added commit hooks ~p ~p", [RoutingRef, SCRef]),
+    lager:debug("*** added commit hooks ~p ~p", [RoutingRef, SCRef]),
     {ok, [RoutingRef, SCRef]}.
 
 -spec subscribe_to_events() -> ok.

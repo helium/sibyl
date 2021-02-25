@@ -27,9 +27,9 @@ init(StreamState) ->
     NewStreamState.
 
 -spec routing(gateway_pb:gateway_routing_req_v1_pb(), grpcbox_stream:t()) ->
-    {continue, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
+    {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 routing(#gateway_routing_req_v1_pb{height = ClientHeight} = Msg, StreamState) ->
-    lager:debug("RPC routing called with height ~p", [ClientHeight]),
+    lager:info("RPC routing called with height ~p", [ClientHeight]),
     #handler_state{initialized = Initialized} = grpcbox_stream:stream_handler_state(StreamState),
     routing(Initialized, sibyl_mgr:blockchain(), Msg, StreamState).
 
@@ -38,7 +38,7 @@ routing(#gateway_routing_req_v1_pb{height = ClientHeight} = Msg, StreamState) ->
     blockchain:blockchain(),
     gateway_pb:gateway_routing_req_v1_pb(),
     grpcbox_stream:t()
-) -> {continue, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
+) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 routing(_Initialized, undefined = _Chain, #gateway_routing_req_v1_pb{} = _Msg, _StreamState) ->
     % if chain not up we have no way to return routing data so just return a 14/503
     lager:debug("chain not ready, returning error response"),
@@ -60,12 +60,11 @@ routing(
             initialized = true
         }
     ),
-    {continue, NewStreamState0};
+    {ok, NewStreamState0};
 routing(true = _Initialized, _Chain, #gateway_routing_req_v1_pb{} = _Msg, StreamState) ->
-    %% we previously initialized, this must be a subsequent incoming msg from the client
-    %% ignore these and return continue directive
+    %% we previously initialized, this must be a subsequent incoming msg from the client - ignore
     lager:debug("ignoring subsequent msg from client ~p", [_Msg]),
-    {continue, StreamState}.
+    {ok, StreamState}.
 
 -spec handle_info(sibyl_mgr:event() | any(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info(
