@@ -95,7 +95,9 @@ init_per_testcase(TestCase, Config) ->
     ?assertEqual({ok, Routing0}, blockchain_ledger_v1:find_routing(OUI1, Ledger)),
 
     %% wait until the ledger hook for the OUI above has fired and been processed by sibyl mgr
-    ok = test_utils:wait_until(fun() -> 2 == sibyl_mgr:get_last_modified(?EVENT_ROUTING_UPDATE) end),
+    ok = test_utils:wait_until(fun() ->
+        2 == sibyl_mgr:get_last_modified(?EVENT_ROUTING_UPDATES_END)
+    end),
 
     %% setup the grpc connection and open a stream
     {ok, Connection} = grpc_client:connect(tcp, "localhost", 10001),
@@ -258,6 +260,7 @@ routing_updates_without_initial_msg_test(Config) ->
     %% update the existing route - confirm we get a streamed update of the updated route - should remain a single route
     #{public := PubKey1, secret := _PrivKey1} = libp2p_crypto:generate_keys(ed25519),
     Addresses1 = [libp2p_crypto:pubkey_to_bin(PubKey1)],
+    ct:pal("NewAddresses1: ~p", [Addresses1]),
     OUITxn1 = blockchain_txn_routing_v1:update_router_addresses(OUI1, Payer, Addresses1, 1),
     SignedOUITxn1 = blockchain_txn_routing_v1:sign(OUITxn1, SigFun),
     {ok, Block1} = blockchain_test_utils:create_block(ConsensusMembers, [SignedOUITxn1]),

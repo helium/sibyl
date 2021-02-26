@@ -167,25 +167,19 @@ handle_info({blockchain_event, {new_chain, NC}}, State = #state{commit_hook_refs
     {ok, NewRefs} = add_commit_hooks(),
     {noreply, State#state{commit_hook_refs = NewRefs}};
 handle_info(
-    {event, EventTopic} = _Msg,
+    {event, EventTopic, _Payload} = _Msg,
     State
-) when EventTopic == ?EVENT_ROUTING_UPDATES_END ->
-    %% ledger routes must have been updated
-    %% send the updated routes to all connected peers
+) ->
+    %% the mgr subscribes to updates in order to update the cache as to when
+    %% relevant CFs were last updated.  Then when a client connects we can determine
+    %% if they maybe have a stale view of the world
     Chain = ?MODULE:blockchain(),
     Ledger = blockchain:ledger(Chain),
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
-    {ok, Routes} = blockchain_ledger_v1:get_routes(Ledger),
-    SigFun = ?MODULE:sigfun(),
-    ClientUpdatePB = sibyl_utils:encode_routing_update_response(Routes, CurHeight, SigFun),
-    erlbus:pub(
-        ?EVENT_ROUTING_UPDATE,
-        sibyl_utils:make_event(?EVENT_ROUTING_UPDATE, ClientUpdatePB)
-    ),
     %% update cache with the height at which the routes have been updated
-    true = ?MODULE:update_last_modified(?EVENT_ROUTING_UPDATE, CurHeight),
+    true = ?MODULE:update_last_modified(EventTopic, CurHeight),
     lager:debug("updated last modified height for event ~p with height ~p", [
-        ?EVENT_ROUTING_UPDATE,
+        EventTopic,
         CurHeight
     ]),
     {noreply, State};
@@ -213,12 +207,13 @@ add_commit_hooks() ->
     %% we do want to be receive events of when there have been route updates
     %% and those updates for the current block have *all* been applied
     RouteUpdatesEndFun = fun
-        (?ROUTING_CF_NAME = _CFName) ->
+        (?ROUTING_CF_NAME = _CFName, CFChangedKeys) ->
+            lager:info("firing route update with changed key ~p", [CFChangedKeys]),
             erlbus:pub(
                 ?EVENT_ROUTING_UPDATES_END,
-                sibyl_utils:make_event(?EVENT_ROUTING_UPDATES_END)
+                sibyl_utils:make_event(?EVENT_ROUTING_UPDATES_END, CFChangedKeys)
             );
-        (_CFName) ->
+        (_CFName, _ChangedKeys) ->
             noop
     end,
     Ref = blockchain_worker:add_commit_hook(

@@ -27,7 +27,7 @@ init(StreamState) ->
     NewStreamState.
 
 -spec routing(gateway_pb:routing_request_pb(), grpcbox_stream:t()) ->
-    {continue, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
+    {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 routing(#routing_request_pb{height = ClientHeight} = Msg, StreamState) ->
     lager:debug("RPC routing called with height ~p", [ClientHeight]),
     #handler_state{initialized = Initialized} = grpcbox_stream:stream_handler_state(StreamState),
@@ -38,7 +38,7 @@ routing(#routing_request_pb{height = ClientHeight} = Msg, StreamState) ->
     blockchain:blockchain(),
     gateway_pb:routing_request_pb(),
     grpcbox_stream:t()
-) -> {continue, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
+) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 routing(_Initialized, undefined = _Chain, #routing_request_pb{} = _Msg, _StreamState) ->
     % if chain not up we have no way to return routing data so just return a 14/503
     lager:debug("chain not ready, returning error response"),
@@ -52,7 +52,7 @@ routing(
     %% not previously initialized, this must be the first msg from the client
     %% we will have some setup to do including subscribing to our required events
     lager:debug("handling first msg from client ~p", [_Msg]),
-    ok = erlbus:sub(self(), ?EVENT_ROUTING_UPDATE),
+    ok = erlbus:sub(self(), ?EVENT_ROUTING_UPDATES_END),
     NewStreamState = maybe_send_inital_all_routes_msg(ClientHeight, StreamState),
     NewStreamState0 = grpcbox_stream:stream_handler_state(
         NewStreamState,
@@ -60,12 +60,11 @@ routing(
             initialized = true
         }
     ),
-    {continue, NewStreamState0};
+    {ok, NewStreamState0};
 routing(true = _Initialized, _Chain, #routing_request_pb{} = _Msg, StreamState) ->
-    %% we previously initialized, this must be a subsequent incoming msg from the client
-    %% ignore these and return continue directive
+    %% we previously initialized, this must be a subsequent incoming msg from the client - ignore
     lager:debug("ignoring subsequent msg from client ~p", [_Msg]),
-    {continue, StreamState}.
+    {ok, StreamState}.
 
 -spec handle_info(sibyl_mgr:event() | any(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info(
@@ -88,14 +87,40 @@ handle_info(
 
 -spec handle_event(sibyl_mgr:event(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_event(
-    {event, ?EVENT_ROUTING_UPDATE, EncodedRoutesPB} = _Event,
+    {event, ?EVENT_ROUTING_UPDATES_END, ChangedKeys} = _Event,
     StreamState
 ) ->
-    lager:debug("sending event to client:  ~p", [
-        EncodedRoutesPB
+    lager:debug("handling routing updates end event. Changed keys:  ~p", [
+        ChangedKeys
     ]),
-    NewStreamState = grpcbox_stream:send(false, EncodedRoutesPB, StreamState),
-    NewStreamState;
+    Chain = sibyl_mgr:blockchain(),
+    Ledger = blockchain:ledger(Chain),
+    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
+    %% get the routing for each changed key & send to clients
+    %% clients will only receive a single routing update per block epoch
+    %% the update will contain 1 or more modifid routes
+    Routes =
+        lists:foldl(
+            fun
+                ({put, <<OUI:32/integer-unsigned-big>>}, Acc) ->
+                    case blockchain_ledger_v1:find_routing(OUI, Ledger) of
+                        {ok, Routing} -> [Routing | Acc];
+                        _ -> Acc
+                    end;
+                (_, Acc) ->
+                    %% ignoring deletes as routing cannot be deleted
+                    Acc
+            end,
+            [],
+            ChangedKeys
+        ),
+    RoutesPB = sibyl_utils:encode_routing_update_response(
+        Routes,
+        CurHeight,
+        sibyl_mgr:sigfun()
+    ),
+    NewStream = grpcbox_stream:send(false, RoutesPB, StreamState),
+    NewStream;
 handle_event(
     {event, _EventType, _Payload} = _Event,
     StreamState
@@ -108,7 +133,7 @@ handle_event(
 maybe_send_inital_all_routes_msg(ClientHeight, StreamState) ->
     %% get the height field from the request msg and only return
     %% the initial full set of routes if they were modified since that height
-    LastModifiedHeight = sibyl_mgr:get_last_modified(?EVENT_ROUTING_UPDATE),
+    LastModifiedHeight = sibyl_mgr:get_last_modified(?EVENT_ROUTING_UPDATES_END),
     case is_data_modified(ClientHeight, LastModifiedHeight) of
         false ->
             lager:debug(
