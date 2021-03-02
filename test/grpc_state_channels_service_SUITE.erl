@@ -708,15 +708,15 @@ follow_sc_test(Config) ->
     end,
     %% we expect the closed at block height 21, push 1 beyond and confirm the height in the payload is as expected
     ok = sibyl_ct_utils:add_and_gossip_fake_blocks(
-        1,
+        5,
         ConsensusMembers,
         RouterNode,
         RouterSwarm,
         RouterChain,
         Self
     ),
-    ok = sibyl_ct_utils:wait_until_height(RouterNode, 22),
-    ok = sibyl_ct_utils:wait_until_local_height(22),
+    ok = sibyl_ct_utils:wait_until_height(RouterNode, 26),
+    ok = sibyl_ct_utils:wait_until_local_height(26),
 
     {data, #{height := 21, msg := {follow_streamed_resp, Data5FollowMsg}}} =
         Data5 = grpc_client:rcv(Stream, 5000),

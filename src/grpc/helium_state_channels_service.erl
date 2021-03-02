@@ -44,7 +44,7 @@
 }).
 
 -export([
-    init/1,
+    init/2,
     is_valid/2,
     close/2,
     follow/2,
@@ -54,8 +54,8 @@
 %% ------------------------------------------------------------------
 %% helium_gateway_state_channels_bhvr callbacks
 %% ------------------------------------------------------------------
--spec init(grpcbox_stream:t()) -> grpcbox_stream:t().
-init(StreamState) ->
+-spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
+init(_RPC, StreamState) ->
     lager:info("handler init, stream state ~p", [StreamState]),
     %% subscribe to block events so we can get blocktime
     ok = blockchain_event:add_handler(self()),
