@@ -209,7 +209,7 @@ add_commit_hooks() ->
     RouteUpdatesEndFun = fun
         (?ROUTING_CF_NAME = _CFName, CFChangedKeys) ->
             lager:info("firing route update with changed key ~p", [CFChangedKeys]),
-            erlbus:pub(
+            sibyl_bus:pub(
                 ?EVENT_ROUTING_UPDATES_END,
                 sibyl_utils:make_event(?EVENT_ROUTING_UPDATES_END, CFChangedKeys)
             );
@@ -226,5 +226,5 @@ add_commit_hooks() ->
 -spec subscribe_to_events() -> ok.
 subscribe_to_events() ->
     %% subscribe to events the mgr is interested in
-    [erlbus:sub(self(), E) || E <- [?EVENT_ROUTING_UPDATES_END]],
+    [sibyl_bus:sub(E, self()) || E <- [?EVENT_ROUTING_UPDATES_END]],
     ok.

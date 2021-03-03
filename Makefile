@@ -29,7 +29,7 @@ cover:
 	$(REBAR) cover
 
 test: | $(grpc_services_directory)
-	$(REBAR) as test do ct --suite test/grpc_SUITE
+	$(REBAR) as test do ct
 
 ci: | $(grpc_services_directory)
 	$(REBAR) do dialyzer,xref && $(REBAR) as test do eunit,ct,cover

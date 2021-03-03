@@ -52,7 +52,7 @@ routing(
     %% not previously initialized, this must be the first msg from the client
     %% we will have some setup to do including subscribing to our required events
     lager:debug("handling first msg from client ~p", [_Msg]),
-    ok = erlbus:sub(self(), ?EVENT_ROUTING_UPDATES_END),
+    ok = sibyl_bus:sub(?EVENT_ROUTING_UPDATES_END, self()),
     NewStreamState = maybe_send_inital_all_routes_msg(ClientHeight, StreamState),
     NewStreamState0 = grpcbox_stream:stream_handler_state(
         NewStreamState,

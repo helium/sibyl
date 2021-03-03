@@ -1,6 +1,9 @@
 -module(grpc_SUITE).
 
 -include("sibyl.hrl").
+-include("../src/grpc/autogen/server/gateway_pb.hrl").
+-include_lib("common_test/include/ct.hrl").
+-include_lib("eunit/include/eunit.hrl").
 
 -export([
     all/0,
@@ -12,12 +15,6 @@
     routing_updates_with_initial_msg_test/1,
     routing_updates_without_initial_msg_test/1
 ]).
-
--include_lib("common_test/include/ct.hrl").
--include_lib("eunit/include/eunit.hrl").
-
-%%-include("../include/sibyl.hrl").
--include("../src/grpc/autogen/server/gateway_pb.hrl").
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
@@ -46,11 +43,11 @@ init_per_testcase(TestCase, Config) ->
     lager:set_loglevel(lager_console_backend, debug),
     lager:set_loglevel({lager_file_backend, LogDir}, debug),
 
-    application:ensure_all_started(erlbus),
     application:ensure_all_started(grpcbox),
 
     Config1 = test_utils:init_per_testcase(TestCase, Config0),
 
+    _ = sibyl_bus:start(),
     {ok, SibylSupPid} = sibyl_sup:start_link(),
     %% give time for the mgr to be initialised with chain
     test_utils:wait_until(fun() -> sibyl_mgr:blockchain() =/= undefined end),
@@ -127,7 +124,6 @@ init_per_testcase(TestCase, Config) ->
 %%--------------------------------------------------------------------
 end_per_testcase(TestCase, Config) ->
     SibylSup = ?config(sibyl_sup, Config),
-    application:stop(erlbus),
     application:stop(grpcbox),
     true = erlang:exit(SibylSup, normal),
     test_utils:end_per_testcase(TestCase, Config).
