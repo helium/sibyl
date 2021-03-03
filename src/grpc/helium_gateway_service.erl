@@ -10,13 +10,13 @@
 }).
 
 -export([
-    init/1,
+    init/2,
     handle_info/2,
     routing/2
 ]).
 
--spec init(grpcbox_stream:t()) -> grpcbox_stream:t().
-init(StreamState) ->
+-spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
+init(_RPC, StreamState) ->
     lager:debug("handler init, stream state ~p", [StreamState]),
     NewStreamState = grpcbox_stream:stream_handler_state(
         StreamState,
