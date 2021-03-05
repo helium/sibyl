@@ -47,7 +47,6 @@ init_per_testcase(TestCase, Config) ->
 
     Config1 = test_utils:init_per_testcase(TestCase, Config0),
 
-    _ = sibyl_bus:start(),
     {ok, SibylSupPid} = sibyl_sup:start_link(),
     %% give time for the mgr to be initialised with chain
     test_utils:wait_until(fun() -> sibyl_mgr:blockchain() =/= undefined end),

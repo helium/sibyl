@@ -52,6 +52,7 @@ start_link() ->
 init([]) ->
     %% create the sibyl_mgr ets table under this supervisor and set ourselves as the heir
     %% we call `ets:give_away' every time we start_link sibyl_mgr
+    _ = sibyl_bus:start(),
     SibylMgrOpts = [{ets, sibyl_mgr:make_ets_table()}],
     {ok,
         {?FLAGS, [
