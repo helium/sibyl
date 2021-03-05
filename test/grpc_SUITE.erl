@@ -1,6 +1,9 @@
 -module(grpc_SUITE).
 
 -include("sibyl.hrl").
+-include("../src/grpc/autogen/server/gateway_pb.hrl").
+-include_lib("common_test/include/ct.hrl").
+-include_lib("eunit/include/eunit.hrl").
 
 -export([
     all/0,
@@ -12,12 +15,6 @@
     routing_updates_with_initial_msg_test/1,
     routing_updates_without_initial_msg_test/1
 ]).
-
--include_lib("common_test/include/ct.hrl").
--include_lib("eunit/include/eunit.hrl").
-
-%%-include("../include/sibyl.hrl").
--include("../src/grpc/autogen/server/gateway_pb.hrl").
 
 %%--------------------------------------------------------------------
 %% COMMON TEST CALLBACK FUNCTIONS
@@ -46,11 +43,11 @@ init_per_testcase(TestCase, Config) ->
     lager:set_loglevel(lager_console_backend, debug),
     lager:set_loglevel({lager_file_backend, LogDir}, debug),
 
-    application:ensure_all_started(erlbus),
     application:ensure_all_started(grpcbox),
 
     Config1 = test_utils:init_per_testcase(TestCase, Config0),
 
+    _ = sibyl_bus:start(),
     {ok, SibylSupPid} = sibyl_sup:start_link(),
     %% give time for the mgr to be initialised with chain
     test_utils:wait_until(fun() -> sibyl_mgr:blockchain() =/= undefined end),
@@ -95,7 +92,9 @@ init_per_testcase(TestCase, Config) ->
     ?assertEqual({ok, Routing0}, blockchain_ledger_v1:find_routing(OUI1, Ledger)),
 
     %% wait until the ledger hook for the OUI above has fired and been processed by sibyl mgr
-    ok = test_utils:wait_until(fun() -> 2 == sibyl_mgr:get_last_modified(?EVENT_ROUTING_UPDATE) end),
+    ok = test_utils:wait_until(fun() ->
+        2 == sibyl_mgr:get_last_modified(?EVENT_ROUTING_UPDATES_END)
+    end),
 
     %% setup the grpc connection and open a stream
     {ok, Connection} = grpc_client:connect(tcp, "localhost", 10001),
@@ -125,7 +124,6 @@ init_per_testcase(TestCase, Config) ->
 %%--------------------------------------------------------------------
 end_per_testcase(TestCase, Config) ->
     SibylSup = ?config(sibyl_sup, Config),
-    application:stop(erlbus),
     application:stop(grpcbox),
     true = erlang:exit(SibylSup, normal),
     test_utils:end_per_testcase(TestCase, Config).
@@ -258,6 +256,7 @@ routing_updates_without_initial_msg_test(Config) ->
     %% update the existing route - confirm we get a streamed update of the updated route - should remain a single route
     #{public := PubKey1, secret := _PrivKey1} = libp2p_crypto:generate_keys(ed25519),
     Addresses1 = [libp2p_crypto:pubkey_to_bin(PubKey1)],
+    ct:pal("NewAddresses1: ~p", [Addresses1]),
     OUITxn1 = blockchain_txn_routing_v1:update_router_addresses(OUI1, Payer, Addresses1, 1),
     SignedOUITxn1 = blockchain_txn_routing_v1:sign(OUITxn1, SigFun),
     {ok, Block1} = blockchain_test_utils:create_block(ConsensusMembers, [SignedOUITxn1]),
