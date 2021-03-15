@@ -134,8 +134,13 @@ check_for_public_ip(PubKeyBin) ->
         {ok, PeerInfo} ->
             ClearedListenAddrs = libp2p_peer:cleared_listen_addrs(PeerInfo),
             %% sort listen addrs, ensure the public ip is at the head
-            [H | _] = libp2p_transport:sort_addrs_with_keys(SwarmTID, ClearedListenAddrs),
-            has_addr_public_ip(H);
+            case ClearedListenAddrs of
+                [] ->
+                    check_for_alias(SwarmTID, PubKeyBin);
+                _ ->
+                    [H | _] = libp2p_transport:sort_addrs_with_keys(SwarmTID, ClearedListenAddrs),
+                    has_addr_public_ip(H)
+            end;
         {error, not_found} ->
             %% we dont have this peer in our peerbook, check if we have an alias for it
             check_for_alias(SwarmTID, PubKeyBin)
