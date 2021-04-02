@@ -1,13 +1,17 @@
 -module(sibyl_utils).
 
+-include("../include/sibyl.hrl").
 -include("grpc/autogen/server/gateway_pb.hrl").
+
+-type gateway_resp_type() ::
+    gateway_pb:gateway_routing_streamed_resp_v1_pb().
 
 %% API
 -export([
     make_event/1,
     make_event/2,
-    encode_routing_update_response/3,
-
+    encode_gateway_resp_v1/3,
+    to_routing_pb/1,
     ensure/2,
     ensure/3
 ]).
@@ -20,19 +24,27 @@ make_event(EventType) ->
 make_event(EventType, EventPayload) ->
     {event, EventType, EventPayload}.
 
--spec encode_routing_update_response(
-    blockchain_ledger_routing_v1:routing(),
+-spec encode_gateway_resp_v1(
+    gateway_resp_type(),
     non_neg_integer(),
     function()
-) -> gateway_pb:routing_response_pb().
-encode_routing_update_response(Routes, Height, SigFun) ->
-    RoutePB = [to_routing_pb(R) || R <- Routes],
-    Update = #routing_response_pb{
-        routings = RoutePB,
-        height = Height
-    },
-    EncodedUpdateBin = gateway_pb:encode_msg(Update, routing_response_pb),
-    Update#routing_response_pb{signature = SigFun(EncodedUpdateBin)}.
+) -> gateway_pb:gateway_resp_v1_pb().
+encode_gateway_resp_v1(#gateway_routing_streamed_resp_v1_pb{} = Msg, Height, SigFun) ->
+    do_encode_gateway_resp_v1({routing_streamed_resp, Msg}, Height, SigFun).
+
+-spec to_routing_pb(blockchain_ledger_routing_v1:routing()) -> gateway_pb:gateway_routing_pb().
+to_routing_pb(Route) ->
+    PubKeyAddresses = blockchain_ledger_routing_v1:addresses(Route),
+    %% using the pub keys, attempt to determine public IP for each peer
+    %% and return in address record
+    Addresses = address_data(PubKeyAddresses),
+    #routing_pb{
+        oui = blockchain_ledger_routing_v1:oui(Route),
+        owner = blockchain_ledger_routing_v1:owner(Route),
+        addresses = Addresses,
+        filters = blockchain_ledger_routing_v1:filters(Route),
+        subnets = blockchain_ledger_routing_v1:subnets(Route)
+    }.
 
 ensure(_, undefined) ->
     undefined;
@@ -93,31 +105,32 @@ ensure(integer_or_default, Value, Default) ->
 %% ------------------------------------------------------------------
 %% Internal functions
 %% ------------------------------------------------------------------
--spec to_routing_pb(gateway_ledger_routing_v1:routing()) -> gateway_pb:routing_pb().
-to_routing_pb(Route) ->
-    PubKeyAddresses = blockchain_ledger_routing_v1:addresses(Route),
-    %% using the pub keys, attempt to determine public IP for each peer
-    %% and return in address record
-    Addresses = address_data(PubKeyAddresses),
-    #routing_pb{
-        oui = blockchain_ledger_routing_v1:oui(Route),
-        owner = blockchain_ledger_routing_v1:owner(Route),
-        addresses = Addresses,
-        filters = blockchain_ledger_routing_v1:filters(Route),
-        subnets = blockchain_ledger_routing_v1:subnets(Route)
-    }.
+-spec do_encode_gateway_resp_v1(
+    {atom(), gateway_resp_type()},
+    non_neg_integer(),
+    function()
+) -> gateway_pb:gateway_resp_v1_pb().
+do_encode_gateway_resp_v1(Msg, Height, SigFun) ->
+    Update = #gateway_resp_v1_pb{
+        height = Height,
+        msg = Msg,
+        signature = <<>>
+    },
+    EncodedUpdateBin = gateway_pb:encode_msg(Update, gateway_resp_v1_pb),
+    Update#gateway_resp_v1_pb{signature = SigFun(EncodedUpdateBin)}.
 
--spec address_data([libp2p_crypto:pubkey_bin()]) -> [#address_pb{}].
+-spec address_data([libp2p_crypto:pubkey_bin()]) -> [#routing_address_pb{}].
 address_data(Addresses) ->
     address_data(Addresses, []).
 
--spec address_data([libp2p_crypto:pubkey_bin()], [#address_pb{}]) -> [#address_pb{}].
+-spec address_data([libp2p_crypto:pubkey_bin()], [#routing_address_pb{}]) ->
+    [#routing_address_pb{}].
 address_data([], Hosts) ->
     Hosts;
 address_data([PubKeyAddress | Rest], Hosts) ->
     case check_for_public_ip(PubKeyAddress) of
         {ok, IP} ->
-            Address = #address_pb{pub_key = PubKeyAddress, uri = format_ip(IP)},
+            Address = #routing_address_pb{pub_key = PubKeyAddress, uri = format_ip(IP)},
             lager:debug("address data ~p", [Address]),
             address_data(Rest, [Address | Hosts]);
         {error, _Reason} ->

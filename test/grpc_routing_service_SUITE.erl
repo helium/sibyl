@@ -1,4 +1,4 @@
--module(grpc_SUITE).
+-module(grpc_routing_service_SUITE).
 
 -include("sibyl.hrl").
 -include("../src/grpc/autogen/server/gateway_pb.hrl").
@@ -100,7 +100,7 @@ init_per_testcase(TestCase, Config) ->
     %% routes_v1 = service, stream_route_updates = RPC call, routes_v1 = decoder, ie the PB generated encode/decode file
     {ok, Stream} = grpc_client:new_stream(
         Connection,
-        'helium.gateway',
+        'helium.gateway_routing',
         routing,
         gateway_client_pb
     ),
@@ -300,8 +300,15 @@ routing_updates_without_initial_msg_test(Config) ->
 %% ------------------------------------------------------------------
 %% Helper functions
 %% ------------------------------------------------------------------
-assert_route_update(RouteUpdate, ExpectedRoutes) ->
-    #{routings := Routes, signature := _Sig, height := _Height} = RouteUpdate,
+assert_route_update(
+    #{
+        msg := {routing_streamed_resp, ResponseMsg},
+        height := _ResponseHeight,
+        signature := _ResponseSig
+    } = _RouteUpdate,
+    ExpectedRoutes
+) ->
+    #{routings := Routes} = ResponseMsg,
     lists:foldl(
         fun(R, Acc) ->
             assert_route(R, lists:nth(Acc, ExpectedRoutes)),
