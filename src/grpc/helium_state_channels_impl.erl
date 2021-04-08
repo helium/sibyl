@@ -1,6 +1,4 @@
--module(helium_state_channels_service).
-
--behavior(helium_gateway_state_channels_bhvr).
+-module(helium_state_channels_impl).
 
 -include("../../include/sibyl.hrl").
 -include("../grpc/autogen/server/gateway_pb.hrl").
@@ -65,20 +63,33 @@ init(_RPC, StreamState) ->
     ),
     NewStreamState.
 
+-spec is_valid(
+    ctx:ctx(),
+    gateway_pb:gateway_sc_is_valid_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
 is_valid(Ctx, #gateway_sc_is_valid_req_v1_pb{} = Message) ->
     Chain = sibyl_mgr:blockchain(),
     is_valid(Chain, Ctx, Message).
 
+-spec close(
+    ctx:ctx(),
+    gateway_pb:gateway_sc_close_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()}.
 close(Ctx, #gateway_sc_close_req_v1_pb{} = Message) ->
     Chain = sibyl_mgr:blockchain(),
     close(Chain, Ctx, Message).
 
+-spec follow(
+    gateway_pb:gateway_follow_req_v1_pb(),
+    grpcbox_stream:t()
+) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 follow(#gateway_sc_follow_req_v1_pb{sc_id = SCID, owner = SCOwner} = Msg, StreamState) ->
     Chain = sibyl_mgr:blockchain(),
     #handler_state{sc_follows = SCFollows} = grpcbox_stream:stream_handler_state(StreamState),
     Key = blockchain_ledger_v1:state_channel_key(SCID, SCOwner),
     follow(Chain, maps:is_key(Key, SCFollows), Msg, StreamState).
 
+-spec handle_info(any(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info({blockchain_event, {add_block, BlockHash, _Sync, _Ledger} = _Event}, StreamState) ->
     %% for each add block event, we get the block height and use this to determine
     %% if we need to send any event msgs back to the client relating to close state
@@ -265,7 +276,7 @@ handle_event(
         ),
     %% use the ledger key to get the standalone SC ID from our follow list
     %% and then determine if we need to send an updated msg to the client
-    case maps:get(LedgerSCID, SCFollows) of
+    case maps:get(LedgerSCID, SCFollows, not_found) of
         {SCMod, SCID, SCExpireAtHeight, SCLastState, SCLastHeight} ->
             {WasSent, NewStreamState, NewClosesSent} = maybe_send_follow_msg(
                 lists:member(SCID, SCClosesSent),
@@ -292,7 +303,7 @@ handle_event(
                     sc_closes_sent = NewClosesSent
                 }
             );
-        _ ->
+        not_found ->
             %% if we dont have a matching entry in the follow list do nothing
             StreamState
     end;
@@ -318,7 +329,7 @@ handle_event(
                         StreamState
                     ),
                 %% use the ledger key to get the standalone SC ID from our follow list
-                case maps:get(LedgerSCID, SCFollows) of
+                case maps:get(LedgerSCID, SCFollows, not_found) of
                     {SCMod, SCID, SCExpireAtHeight, SCLastState, SCLastBlockTime} ->
                         {ok, CurHeight} = get_height(),
                         lager:info("got PUT for V2 SC ~p with close state ~p at height ~p", [
@@ -352,7 +363,7 @@ handle_event(
                                 sc_closes_sent = NewClosesSent
                             }
                         );
-                    _ ->
+                    not_found ->
                         %% if we dont have a matching entry in the follow list do nothing
                         StreamState
                 end

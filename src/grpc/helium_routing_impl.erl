@@ -1,6 +1,4 @@
--module(helium_routing_service).
-
--behavior(helium_gateway_routing_bhvr).
+-module(helium_routing_impl).
 
 -include("../../include/sibyl.hrl").
 -include("autogen/server/gateway_pb.hrl").
