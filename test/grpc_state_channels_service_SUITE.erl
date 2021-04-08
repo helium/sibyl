@@ -49,25 +49,26 @@ all() ->
 %%--------------------------------------------------------------------
 init_per_testcase(TestCase, Config) ->
     %% setup test dirs
-    InitConfig0 = sibyl_ct_utils:init_base_dir_config(?MODULE, TestCase, Config),
+    Config0 = sibyl_ct_utils:init_base_dir_config(?MODULE, TestCase, Config),
 
     application:ensure_all_started(lager),
-    application:ensure_all_started(erlbus),
     application:ensure_all_started(grpc_client),
     application:ensure_all_started(grpcbox),
 
-    InitConfig = sibyl_ct_utils:init_per_testcase(TestCase, InitConfig0),
-    Nodes = ?config(nodes, InitConfig),
+    Config1 = sibyl_ct_utils:init_per_testcase(TestCase, Config0),
 
-    LogDir = ?config(log_dir, InitConfig0),
+    LogDir = ?config(log_dir, Config1),
     lager:set_loglevel(lager_console_backend, debug),
     lager:set_loglevel({lager_file_backend, LogDir}, debug),
+
+    Nodes = ?config(nodes, Config1),
+    GenesisBlock = ?config(genesis_block, Config1),
 
     %% start a local blockchain
     #{public := LocalNodePubKey, secret := LocalNodePrivKey} = libp2p_crypto:generate_keys(
         ecc_compact
     ),
-    BaseDir = ?config(base_dir, InitConfig),
+    BaseDir = ?config(base_dir, Config1),
     LocalNodeSigFun = libp2p_crypto:mk_sig_fun(LocalNodePrivKey),
     LocalNodeECDHFun = libp2p_crypto:mk_ecdh_fun(LocalNodePrivKey),
     Opts = [
@@ -77,46 +78,47 @@ init_per_testcase(TestCase, Config) ->
         {num_consensus_members, 7},
         {base_dir, BaseDir}
     ],
+    application:set_env(blockchain, peer_cache_timeout, 10000),
+    application:set_env(blockchain, peerbook_update_interval, 200),
+    application:set_env(blockchain, peerbook_allow_rfc1918, true),
+    application:set_env(blockchain, listen_interface, "127.0.0.1"),
+    application:set_env(blockchain, max_inbound_connections, length(Nodes) * 2),
+    application:set_env(blockchain, outbound_gossip_connections, length(Nodes) * 2),
+
     {ok, Sup} = blockchain_sup:start_link(Opts),
 
-    %% connect the local node to the others
-    [First | _Rest] = Nodes,
+    %% load the genesis block on the local node
+    blockchain_worker:integrate_genesis_block(GenesisBlock),
 
-    FirstSwarm = ct_rpc:call(First, blockchain_swarm, swarm, []),
-    FirstListenAddr = hd(ct_rpc:call(First, libp2p_swarm, listen_addrs, [FirstSwarm])),
-    LocalSwarm = blockchain_swarm:swarm(),
-    ct:pal("local node connection to ~p on addr ~p", [First, FirstListenAddr]),
-    libp2p_swarm:connect(LocalSwarm, FirstListenAddr),
-
-    %% have other nodes connect to local node, to ensure it is properly connected
-    LocalListenAddr = hd(libp2p_swarm:listen_addrs(LocalSwarm)),
-    ok = lists:foreach(
-        fun(Node) ->
-            NodeSwarm = ct_rpc:call(Node, blockchain_swarm, swarm, []),
-            ct_rpc:call(Node, libp2p_swarm, connect, [NodeSwarm, LocalListenAddr])
-        end,
-        Nodes
-    ),
-
-    GossipGroup = libp2p_swarm:gossip_group(LocalSwarm),
-    sibyl_ct_utils:wait_until(
-        fun() ->
-            ConnectedAddrs = libp2p_group_gossip:connected_addrs(GossipGroup, all),
-            length(ConnectedAddrs) == length(Nodes)
-        end,
-        50,
-        20
-    ),
+    %% wait until the local node has the genesis block
+    ok = sibyl_ct_utils:wait_until_local_height(1),
 
     {ok, SibylSupPid} = sibyl_sup:start_link(),
     %% give time for the mgr to be initialised with chain
     sibyl_ct_utils:wait_until(fun() -> sibyl_mgr:blockchain() /= undefined end),
 
-    Balance = 5000,
-    NumConsensusMembers = ?config(num_consensus_members, InitConfig),
+    %% connect the local node to the slaves
+    LocalSwarm = blockchain_swarm:swarm(),
+    _LocalListenAddr = hd(libp2p_swarm:listen_addrs(LocalSwarm)),
+    ok = lists:foreach(
+        fun(Node) ->
+            NodeSwarm = ct_rpc:call(Node, blockchain_swarm, swarm, [], 2000),
+            [H | _] = ct_rpc:call(Node, libp2p_swarm, listen_addrs, [NodeSwarm], 2000),
+            libp2p_swarm:connect(LocalSwarm, H)
+        end,
+        Nodes
+    ),
+    %% wait until the local node is well connected
+    sibyl_ct_utils:wait_until(
+        fun() ->
+            LocalGossipPeers = blockchain_swarm:gossip_peers(),
+            ct:pal("local node connected to ~p peers", [length(LocalGossipPeers)]),
+            length(LocalGossipPeers) >= (length(Nodes) / 2) + 1
+        end
+    ),
 
     %% accumulate the address of each node
-    Addrs = lists:foldl(
+    PubKeyBins = lists:foldl(
         fun(Node, Acc) ->
             Addr = ct_rpc:call(Node, blockchain_swarm, pubkey_bin, []),
             [Addr | Acc]
@@ -125,77 +127,54 @@ init_per_testcase(TestCase, Config) ->
         Nodes
     ),
 
-    ConsensusAddrs = lists:sublist(lists:sort(Addrs), NumConsensusMembers),
-    DefaultVars = #{num_consensus_members => NumConsensusMembers},
-    ExtraVars = #{
-        max_open_sc => 2,
-        min_expire_within => 10,
-        max_xor_filter_size => 1024 * 100,
-        max_xor_filter_num => 5,
-        max_subnet_size => 65536,
-        min_subnet_size => 8,
-        max_subnet_num => 20,
-        sc_grace_blocks => 5,
-        dc_payload_size => 24
-    },
-
-    {InitialVars, _Config} = sibyl_ct_utils:create_vars(maps:merge(DefaultVars, ExtraVars)),
-
-    % Create genesis block
-    GenPaymentTxs = [blockchain_txn_coinbase_v1:new(Addr, Balance) || Addr <- Addrs],
-    GenDCsTxs = [blockchain_txn_dc_coinbase_v1:new(Addr, Balance) || Addr <- Addrs],
-    GenConsensusGroupTx = blockchain_txn_consensus_group_v1:new(ConsensusAddrs, <<"proof">>, 1, 0),
-
-    %% Make one consensus member the owner of all gateways
-    GenGwTxns = [
-        blockchain_txn_gen_gateway_v1:new(
-            Addr,
-            hd(ConsensusAddrs),
-            h3:from_geo({37.780586, -122.469470}, 13),
-            0
-        )
-        || Addr <- Addrs
-    ],
-
-    Txs = InitialVars ++ GenPaymentTxs ++ GenDCsTxs ++ GenGwTxns ++ [GenConsensusGroupTx],
-    GenesisBlock = blockchain_block:new_genesis_block(Txs),
-
-    %% tell each node to integrate the genesis block
-    lists:foreach(
-        fun(Node) ->
-            ?assertMatch(
-                ok,
-                ct_rpc:call(Node, blockchain_worker, integrate_genesis_block, [GenesisBlock])
-            )
-        end,
-        Nodes
-    ),
-
-    %% do the same for local node
-    blockchain_worker:integrate_genesis_block(GenesisBlock),
-
-    %% wait till each worker gets the gensis block
-    ok = lists:foreach(
-        fun(Node) ->
-            ok = sibyl_ct_utils:wait_until(
-                fun() ->
-                    C0 = ct_rpc:call(Node, blockchain_worker, blockchain, []),
-                    {ok, Height} = ct_rpc:call(Node, blockchain, height, [C0]),
-                    ct:pal("node ~p height ~p", [Node, Height]),
-                    Height == 1
+    %% the SC tests use the first two nodes as the gateway and router
+    %% for the GRPC group to work we need to ensure these two nodes are connected to each other
+    %% in blockchain_ct_utils:init_per_testcase the nodes are connected to a majority of the group
+    %% but that does not guarantee these two nodes will be connected
+    [RouterNode, GatewayNode | _] = Nodes,
+    [RouterNodeAddr, GatewayNodeAddr | _] = PubKeyBins,
+    ok = sibyl_ct_utils:wait_until(
+        fun() ->
+            lists:all(
+                fun({Node, AddrToConnectToo}) ->
+                    try
+                        GossipPeers = ct_rpc:call(Node, blockchain_swarm, gossip_peers, [], 500),
+                        ct:pal("~p connected to peers ~p", [Node, GossipPeers]),
+                        case
+                            lists:member(
+                                libp2p_crypto:pubkey_bin_to_p2p(AddrToConnectToo),
+                                GossipPeers
+                            )
+                        of
+                            true ->
+                                true;
+                            false ->
+                                ct:pal("~p is not connected to desired peer ~p", [
+                                    Node,
+                                    AddrToConnectToo
+                                ]),
+                                Swarm = ct_rpc:call(Node, blockchain_swarm, swarm, [], 500),
+                                CRes = ct_rpc:call(
+                                    Node,
+                                    libp2p_swarm,
+                                    connect,
+                                    [Swarm, AddrToConnectToo],
+                                    500
+                                ),
+                                ct:pal("Connecting ~p to ~p: ~p", [Node, AddrToConnectToo, CRes]),
+                                false
+                        end
+                    catch
+                        _C:_E ->
+                            false
+                    end
                 end,
-                100,
-                100
+                [{RouterNode, GatewayNodeAddr}, {GatewayNode, RouterNodeAddr}]
             )
         end,
-        Nodes
+        200,
+        150
     ),
-
-    %% wait until the local node has the genesis block
-    ok = sibyl_ct_utils:wait_until_local_height(1),
-
-    ok = sibyl_ct_utils:check_genesis_block(InitConfig, GenesisBlock),
-    ConsensusMembers = sibyl_ct_utils:get_consensus_members(InitConfig, ConsensusAddrs),
 
     %% setup the grpc connection
     {ok, Connection} = grpc_client:connect(tcp, "localhost", 10001),
@@ -206,10 +185,9 @@ init_per_testcase(TestCase, Config) ->
         {local_node_pubkey_bin, libp2p_crypto:pubkey_to_bin(LocalNodePubKey)},
         {local_node_privkey, LocalNodePrivKey},
         {local_node_sigfun, LocalNodeSigFun},
-        {consensus_members, ConsensusMembers},
         {sibyl_sup, SibylSupPid},
         {grpc_connection, Connection}
-        | InitConfig
+        | Config1
     ].
 
 %%--------------------------------------------------------------------
@@ -220,7 +198,6 @@ end_per_testcase(TestCase, Config) ->
     grpc_client:stop_connection(Connection),
     BlockchainSup = ?config(sup, Config),
     SibylSup = ?config(sibyl_sup, Config),
-    application:stop(erlbus),
     application:stop(grpcbox),
     application:stop(grpc_client),
     true = erlang:exit(BlockchainSup, normal),
@@ -310,7 +287,7 @@ is_valid_sc_test(Config) ->
     }} = grpc_client:unary(
         Connection,
         #{sc => ActiveSCMap},
-        'helium.gateway_state_channels',
+        'helium.gateway',
         'is_valid',
         gateway_client_pb,
         []
@@ -418,7 +395,7 @@ close_sc_test(Config) ->
     }} = grpc_client:unary(
         Connection,
         #{close_txn => SignedTxnMap2},
-        'helium.gateway_state_channels',
+        'helium.gateway',
         'close',
         gateway_client_pb,
         []
@@ -531,7 +508,7 @@ follow_sc_test(Config) ->
     %% setup a 'follow' streamed connection to server
     {ok, Stream} = grpc_client:new_stream(
         Connection,
-        'helium.gateway_state_channels',
+        'helium.gateway',
         follow,
         gateway_client_pb
     ),
@@ -579,7 +556,7 @@ follow_sc_test(Config) ->
     ct:pal("Response Data0: ~p", [Data0]),
     #{sc_id := Data0SCID1, close_state := Data0CloseState} = Data0FollowMsg,
     ?assertEqual(ActiveSCID, Data0SCID1),
-    ?assertEqual(closable, Data0CloseState),
+    ?assertEqual(close_state_closable, Data0CloseState),
 
     %% add additional blocks to trigger the closing state
     ok = sibyl_ct_utils:add_and_gossip_fake_blocks(
@@ -599,7 +576,7 @@ follow_sc_test(Config) ->
     ct:pal("Response Data1: ~p", [Data1]),
     #{sc_id := Data1SCID1, close_state := Data1CloseState} = Data1FollowMsg,
     ?assertEqual(ActiveSCID, Data1SCID1),
-    ?assertEqual(closing, Data1CloseState),
+    ?assertEqual(close_state_closing, Data1CloseState),
 
     %% wait until we see a close txn for SC1
     %% then push it to the router node and have it gossip it around
@@ -636,7 +613,7 @@ follow_sc_test(Config) ->
     ct:pal("Response Data2: ~p", [Data2]),
     #{sc_id := Data2SCID1, close_state := Data2CloseState} = Data2FollowMsg,
     ?assertEqual(ActiveSCID, Data2SCID1),
-    ?assertEqual(closed, Data2CloseState),
+    ?assertEqual(close_state_closed, Data2CloseState),
 
     %%
     %% SC1 is now closed, SC2 should be the active SC
@@ -662,12 +639,12 @@ follow_sc_test(Config) ->
     %% we should receive 3 stream msgs for SC2, closable, closing and closed
     %%
 
-    {data, #{height := 19, msg := {follow_streamed_resp, Data3FollowMsg}}} =
+    {data, #{height := 16, msg := {follow_streamed_resp, Data3FollowMsg}}} =
         Data3 = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Data3: ~p", [Data3]),
     #{sc_id := Data3SCID2, close_state := Data3CloseState} = Data3FollowMsg,
     ?assertEqual(ActiveSCID2, Data3SCID2),
-    ?assertEqual(Data3CloseState, closable),
+    ?assertEqual(Data3CloseState, close_state_closable),
 
     ok = sibyl_ct_utils:add_and_gossip_fake_blocks(
         1,
@@ -686,7 +663,7 @@ follow_sc_test(Config) ->
     ct:pal("Response Data4: ~p", [Data4]),
     #{sc_id := Data4SCID2, close_state := Data4CloseState} = Data4FollowMsg,
     ?assertEqual(ActiveSCID2, Data4SCID2),
-    ?assertEqual(Data4CloseState, closing),
+    ?assertEqual(Data4CloseState, close_state_closing),
 
     %% wait until we see a close txn for SC2
     %% then push it to the router node and have it gossip it around
@@ -723,7 +700,7 @@ follow_sc_test(Config) ->
     ct:pal("Response Data5: ~p", [Data5]),
     #{sc_id := Data5SCID2, close_state := Data5CloseState} = Data5FollowMsg,
     ?assertEqual(ActiveSCID2, Data5SCID2),
-    ?assertEqual(Data5CloseState, closed),
+    ?assertEqual(Data5CloseState, close_state_closed),
 
     ok.
 

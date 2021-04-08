@@ -360,8 +360,7 @@ init_per_testcase(TestCase, Config) ->
                         grpc_opts => #{
                             service_protos => [gateway_pb],
                             services => #{
-                                'helium.gateway_routing' => helium_routing_service,
-                                'helium.gateway_state_channels' => helium_state_channels_service
+                                'helium.gateway' => helium_gateway_service
                             }
                         },
                         transport_opts => #{ssl => false},
@@ -390,76 +389,6 @@ init_per_testcase(TestCase, Config) ->
 
     %% check that the config loaded correctly on each node
     true = lists:all(fun(Res) -> Res == ok end, ConfigResult),
-
-    %%    %% tell the rest of the miners to connect to the first miner
-    %%    [First | Rest] = Nodes,
-    %%    FirstSwarm = ct_rpc:call(First, blockchain_swarm, swarm, []),
-    %%    FirstListenAddr = hd(ct_rpc:call(First, libp2p_swarm, listen_addrs, [FirstSwarm])),
-    %%    ok = lists:foreach(
-    %%        fun(Node) ->
-    %%            Swarm = ct_rpc:call(Node, blockchain_swarm, swarm, []),
-    %%            ct_rpc:call(Node, libp2p_swarm, connect, [Swarm, FirstListenAddr])
-    %%        end,
-    %%        Rest
-    %%    ),
-    %%
-    %%    %% also do the reverse just to ensure swarms are _properly_ connected
-    %%    [Head | Tail] = lists:reverse(Nodes),
-    %%    HeadSwarm = ct_rpc:call(Head, blockchain_swarm, swarm, []),
-    %%    HeadListenAddr = hd(ct_rpc:call(Head, libp2p_swarm, listen_addrs, [HeadSwarm])),
-    %%    ok = lists:foreach(
-    %%        fun(Node) ->
-    %%            Swarm = ct_rpc:call(Node, blockchain_swarm, swarm, []),
-    %%            ct_rpc:call(Node, libp2p_swarm, connect, [Swarm, HeadListenAddr])
-    %%        end,
-    %%        Tail
-    %%    ),
-    %%
-    %%    %% test that each node setup libp2p properly
-    %%    lists:foreach(
-    %%        fun(Node) ->
-    %%            Swarm = ct_rpc:call(Node, blockchain_swarm, swarm, []),
-    %%            SwarmID = ct_rpc:call(Node, libp2p_swarm, network_id, [Swarm]),
-    %%            Addr = ct_rpc:call(Node, blockchain_swarm, pubkey_bin, []),
-    %%            Sessions = ct_rpc:call(Node, libp2p_swarm, sessions, [Swarm]),
-    %%            GossipGroup = ct_rpc:call(Node, libp2p_swarm, gossip_group, [Swarm]),
-    %%            wait_until(
-    %%                fun() ->
-    %%                    ConnectedAddrs = ct_rpc:call(
-    %%                        Node,
-    %%                        libp2p_group_gossip,
-    %%                        connected_addrs,
-    %%                        [GossipGroup, all]
-    %%                    ),
-    %%                    TotalNodes == length(ConnectedAddrs)
-    %%                end,
-    %%                50,
-    %%                20
-    %%            ),
-    %%            ConnectedAddrs = ct_rpc:call(
-    %%                Node,
-    %%                libp2p_group_gossip,
-    %%                connected_addrs,
-    %%                [GossipGroup, all]
-    %%            ),
-    %%
-    %%            ct:pal(
-    %%                "Node: ~p~nAddr: ~p~nP2PAddr: ~p~nSessions : ~p~nGossipGroup:"
-    %%                " ~p~nConnectedAddrs: ~p~nSwarm:~p~nSwarmID: ~p",
-    %%                [
-    %%                    Node,
-    %%                    Addr,
-    %%                    libp2p_crypto:pubkey_bin_to_p2p(Addr),
-    %%                    Sessions,
-    %%                    GossipGroup,
-    %%                    ConnectedAddrs,
-    %%                    Swarm,
-    %%                    SwarmID
-    %%                ]
-    %%            )
-    %%        end,
-    %%        Nodes
-    %%    ),
 
     %% accumulate the listen addr of all the nodes
     Addrs = pmap(
@@ -623,9 +552,6 @@ initialize_nodes(Config) ->
         end,
         Nodes
     ),
-
-    %%    %% do the same for local node
-    %%    blockchain_worker:integrate_genesis_block(GenesisBlock),
 
     %% wait till each worker gets the gensis block
     ok = lists:foreach(

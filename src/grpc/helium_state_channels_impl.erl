@@ -5,10 +5,10 @@
 -include_lib("helium_proto/include/blockchain_state_channel_v1_pb.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
 
--define(SC_CLOSED, closed).
--define(SC_CLOSING, closing).
--define(SC_CLOSABLE, closable).
--define(SC_DISPUTE, dispute).
+-define(SC_CLOSED, close_state_closed).
+-define(SC_CLOSING, close_state_closing).
+-define(SC_CLOSABLE, close_state_closable).
+-define(SC_DISPUTE, close_state_dispute).
 
 -type sc_state() :: undefined | ?SC_CLOSED | ?SC_CLOSING | ?SC_CLOSABLE | ?SC_DISPUTE.
 
@@ -100,7 +100,9 @@ handle_info({blockchain_event, {add_block, BlockHash, _Sync, _Ledger} = _Event},
         case blockchain:get_block(BlockHash, Chain) of
             {ok, Block} ->
                 BlockHeight = blockchain_block:height(Block),
-                lager:info("processing add_block event for height ~p", [BlockHeight]),
+                lager:info("processing add_block event for height ~p", [
+                    BlockHeight
+                ]),
                 process_sc_block_events(BlockHeight, SCGrace, StreamState);
             _ ->
                 %% hmm do nothing...
@@ -217,8 +219,7 @@ follow(
     LedgerSCID = blockchain_ledger_v1:state_channel_key(SCID, SCOwner),
     SCTopic = sibyl_utils:make_sc_topic(LedgerSCID),
     lager:info("subscribing to SC events for key ~p and topic ~p", [LedgerSCID, SCTopic]),
-    ok = erlbus:sub(self(), SCTopic),
-
+    ok = sibyl_bus:sub(SCTopic, self()),
     %% add this SC to our follow list
     #handler_state{sc_follows = SCFollows} =
         HandlerState = grpcbox_stream:stream_handler_state(
@@ -414,7 +415,7 @@ process_sc_block_events(
 ->
     %% send the client a 'closable' msg if the blocktime is same as the SC expire time
     %% unless we previously entered the closed or dispute state
-    lager:info("process_sc_close_events: block time same as SCExpireHeight", []),
+    lager:info("process_sc_block_events: block time same as SCExpireHeight", []),
     %% send closeable event if not previously sent
     #handler_state{sc_closables_sent = SCClosablesSent} =
         HandlerState = grpcbox_stream:stream_handler_state(
@@ -462,7 +463,7 @@ process_sc_block_events(
 ->
     %% send the client a 'closing' msg if we are past SCExpireTime and within the grace period
     %% unless we previously entered the closed or dispute state
-    lager:info("process_sc_close_events: block time within SC expire-at grace time", []),
+    lager:info("process_sc_block_events: block time within SC expire-at grace time", []),
     %% send closing event if not previously sent
     #handler_state{sc_closings_sent = SCClosingsSent} =
         HandlerState = grpcbox_stream:stream_handler_state(
@@ -503,7 +504,7 @@ process_sc_block_events(
     _SCGrace,
     StreamState
 ) ->
-    lager:info("process_sc_close_events: nothing to do for SC ~p at blocktime ~p", [
+    lager:info("process_sc_block_events: nothing to do for SC ~p at blocktime ~p", [
         _SCID,
         _BlockTime
     ]),

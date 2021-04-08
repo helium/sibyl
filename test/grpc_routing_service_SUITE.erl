@@ -72,8 +72,6 @@ init_per_testcase(TestCase, Config) ->
 
     {ok, Sup} = blockchain_sup:start_link(Opts),
 
-
-
     %% load the genesis block on the local node
     blockchain_worker:integrate_genesis_block(GenesisBlock),
 
@@ -86,37 +84,13 @@ init_per_testcase(TestCase, Config) ->
     ok = lists:foreach(
         fun(Node) ->
             NodeSwarm = ct_rpc:call(Node, blockchain_swarm, swarm, [], 2000),
-            [H|_] = ct_rpc:call(Node, libp2p_swarm, listen_addrs, [NodeSwarm], 2000),
+            [H | _] = ct_rpc:call(Node, libp2p_swarm, listen_addrs, [NodeSwarm], 2000),
             libp2p_swarm:connect(LocalSwarm, H)
         end,
         Nodes
     ),
     LocalGossipPeers = blockchain_swarm:gossip_peers(),
     ct:pal("local node connected to ~p peers", [length(LocalGossipPeers)]),
-
-%%    %% ensure the local node is well connected
-%%    Addrs = ?config(node_listen_addrs, Config1),
-%%    ok = sibyl_ct_utils:wait_until(
-%%        fun() ->
-%%            GossipPeers = blockchain_swarm:gossip_peers(),
-%%            ct:pal("local node connected to ~p peers", [length(GossipPeers)]),
-%%            case length(GossipPeers) >= 3 of
-%%                true ->
-%%                    true;
-%%                false ->
-%%                    lists:foreach(
-%%                        fun(A) ->
-%%                            CRes = libp2p_swarm:connect(LocalSwarm, A),
-%%                            ct:pal("Connecting localswarm to ~p, result: ~p", [A, CRes])
-%%                        end,
-%%                        Addrs
-%%                    ),
-%%                    false
-%%            end
-%%        end,
-%%        50,
-%%        20
-%%    ),
 
     %% now that all nodes are up and connected, start sibyl
     {ok, SibylSupPid} = sibyl_sup:start_link(),
@@ -178,7 +152,7 @@ init_per_testcase(TestCase, Config) ->
     %% routes_v1 = service, stream_route_updates = RPC call, routes_v1 = decoder, ie the PB generated encode/decode file
     {ok, Stream} = grpc_client:new_stream(
         Connection,
-        'helium.gateway_routing',
+        'helium.gateway',
         routing,
         gateway_client_pb
     ),
@@ -201,6 +175,8 @@ init_per_testcase(TestCase, Config) ->
 %% TEST CASE TEARDOWN
 %%--------------------------------------------------------------------
 end_per_testcase(TestCase, Config) ->
+    meck:unload(blockchain_txn_oui_v1),
+    meck:unload(blockchain_ledger_v1),
     SibylSup = ?config(sibyl_sup, Config),
     application:stop(grpcbox),
     true = erlang:exit(SibylSup, normal),
