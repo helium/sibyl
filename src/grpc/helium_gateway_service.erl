@@ -15,10 +15,7 @@
 
 -behavior(helium_gateway_bhvr).
 
-%%-include("../../include/sibyl.hrl").
 -include("../grpc/autogen/server/gateway_pb.hrl").
-%%-include_lib("helium_proto/include/blockchain_state_channel_v1_pb.hrl").
-%%-include_lib("blockchain/include/blockchain_vars.hrl").
 
 %% common APIs
 -export([
@@ -40,10 +37,14 @@
 
 %% common API implementations
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
-init(RPC = routing, StreamState) -> helium_routing_impl:init(RPC, StreamState);
-init(RPC = is_valid, StreamState) -> helium_state_channels_impl:init(RPC, StreamState);
-init(RPC = close, StreamState) -> helium_state_channels_impl:init(RPC, StreamState);
-init(RPC = follow, StreamState) -> helium_state_channels_impl:init(RPC, StreamState).
+init(RPC = routing, StreamState) ->
+    helium_routing_impl:init(RPC, StreamState);
+init(_RPC = is_valid, StreamState) ->
+    StreamState;
+init(_RPC = close, StreamState) ->
+    StreamState;
+init(RPC = follow, StreamState) ->
+    helium_state_channels_impl:init(RPC, StreamState).
 
 -spec handle_info(atom(), any(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info(_RPC = routing, Msg, StreamState) ->
