@@ -413,7 +413,7 @@ close_sc_test(Config) ->
 
 follow_sc_test(Config) ->
     %% exercise the streaming API follow, supply it with SC IDs we want to follow
-    %% and confirm the client receives events relating to its closed status
+    %% and confirm the client receives events relating to the closed status of each
     %% closable event will be sent when a followed SCs expire at height equals current block height
     %% closing event will be sent when a followed SC is not yet closed but current block height > SC expire at height and within the SC's grace period
     %% closed event will be sent when a followed SC is closed
@@ -639,7 +639,7 @@ follow_sc_test(Config) ->
     %% we should receive 3 stream msgs for SC2, closable, closing and closed
     %%
 
-    {data, #{height := 16, msg := {follow_streamed_resp, Data3FollowMsg}}} =
+    {data, #{height := 19, msg := {follow_streamed_resp, Data3FollowMsg}}} =
         Data3 = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Data3: ~p", [Data3]),
     #{sc_id := Data3SCID2, close_state := Data3CloseState} = Data3FollowMsg,
@@ -685,18 +685,18 @@ follow_sc_test(Config) ->
     end,
     %% we expect the closed at block height 21, push 1 beyond and confirm the height in the payload is as expected
     ok = sibyl_ct_utils:add_and_gossip_fake_blocks(
-        5,
+        1,
         ConsensusMembers,
         RouterNode,
         RouterSwarm,
         RouterChain,
         Self
     ),
-    ok = sibyl_ct_utils:wait_until_height(RouterNode, 26),
-    ok = sibyl_ct_utils:wait_until_local_height(26),
+    ok = sibyl_ct_utils:wait_until_height(RouterNode, 22),
+    ok = sibyl_ct_utils:wait_until_local_height(22),
 
     {data, #{height := 21, msg := {follow_streamed_resp, Data5FollowMsg}}} =
-        Data5 = grpc_client:rcv(Stream, 5000),
+        Data5 = grpc_client:rcv(Stream, 8000),
     ct:pal("Response Data5: ~p", [Data5]),
     #{sc_id := Data5SCID2, close_state := Data5CloseState} = Data5FollowMsg,
     ?assertEqual(ActiveSCID2, Data5SCID2),
