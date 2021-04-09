@@ -1,6 +1,6 @@
 %%%-------------------------------------------------------------------
 %% wrapper implementations for the APIs & RPCs for the gateway service
-%% basically this module handles various RPC and function call from grpcbox_stream
+%% basically this module handles various RPC and function calls from grpcbox_stream
 %% and routes it to the required application specific handler module
 %% due to issues with the rust grpc client, we have amalgamated what were
 %% previously distinct grpc services ( such as state channels and routing )
@@ -35,17 +35,36 @@
     follow/2
 ]).
 
+%%%-------------------------------------------------------------------
 %% common API implementations
+%%%-------------------------------------------------------------------
+
+%% its really only stream RPCs which need to handle the init
+%% as its those which are likely to manage their own state
+%% unary APIs only need to return the same passed in StreamState
+
+%%
+%% routing streaming APIs
+%%
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
 init(RPC = routing, StreamState) ->
     helium_routing_impl:init(RPC, StreamState);
+%%
+%% state channel streaming APIs
+%%
+init(RPC = follow, StreamState) ->
+    helium_state_channels_impl:init(RPC, StreamState);
+%%
+%% state channel unary APIs
+%%
 init(_RPC = is_valid, StreamState) ->
     StreamState;
 init(_RPC = close, StreamState) ->
-    StreamState;
-init(RPC = follow, StreamState) ->
-    helium_state_channels_impl:init(RPC, StreamState).
+    StreamState.
 
+%%
+%% Any API can potentially handle info msgs
+%%
 -spec handle_info(atom(), any(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info(_RPC = routing, Msg, StreamState) ->
     helium_routing_impl:handle_info(Msg, StreamState);
@@ -60,16 +79,16 @@ handle_info(_RPC, _Msg, StreamState) ->
     lager:warning("got unhandled info msg, RPC ~p, Msg, ~p", [_RPC, _Msg]),
     StreamState.
 
-%%
-%% Routing APIs implementation
-%%
+%%%-------------------------------------------------------------------
+%% Routing RPC implementations
+%%%-------------------------------------------------------------------
 -spec routing(gateway_pb:gateway_routing_req_v1_pb(), grpcbox_stream:t()) ->
     {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 routing(Msg, StreamState) -> helium_routing_impl:routing(Msg, StreamState).
 
-%%
-%% State channel API implementations
-%%
+%%%-------------------------------------------------------------------
+%% State channel RPC implementations
+%%%-------------------------------------------------------------------
 -spec is_valid(
     ctx:ctx(),
     gateway_pb:gateway_sc_is_valid_req_v1_pb()

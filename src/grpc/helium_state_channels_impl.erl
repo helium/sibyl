@@ -411,7 +411,7 @@ process_sc_block_events(
 ) when
     BlockTime == SCExpireAtHeight andalso
         BlockTime > SCLastBlockTime andalso
-        (SCLastState /= closed andalso SCLastState /= dispute)
+        (SCLastState /= ?SC_CLOSED andalso SCLastState /= ?SC_DISPUTE)
 ->
     %% send the client a 'closable' msg if the blocktime is same as the SC expire time
     %% unless we previously entered the closed or dispute state
@@ -459,7 +459,7 @@ process_sc_block_events(
     BlockTime >= SCExpireAtHeight + (SCGrace div 3) andalso
         BlockTime =< SCExpireAtHeight + SCGrace andalso
         BlockTime > SCLastBlockTime andalso
-        (SCLastState /= closed andalso SCLastState /= dispute)
+        (SCLastState /= ?SC_CLOSED andalso SCLastState /= ?SC_DISPUTE)
 ->
     %% send the client a 'closing' msg if we are past SCExpireTime and within the grace period
     %% unless we previously entered the closed or dispute state
