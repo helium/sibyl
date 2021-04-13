@@ -96,7 +96,7 @@ handle_event(
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
     %% get the routing for each changed key & send to clients
     %% clients will only receive a single routing update per block epoch
-    %% the update will contain 1 or more modifid routes
+    %% the update will contain 1 or more modified routes
     Routes =
         lists:foldl(
             fun

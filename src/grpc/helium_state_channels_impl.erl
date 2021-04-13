@@ -80,7 +80,7 @@ close(Ctx, #gateway_sc_close_req_v1_pb{} = Message) ->
     close(Chain, Ctx, Message).
 
 -spec follow(
-    gateway_pb:gateway_follow_req_v1_pb(),
+    gateway_pb:gateway_sc_follow_req_v1(),
     grpcbox_stream:t()
 ) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 follow(#gateway_sc_follow_req_v1_pb{sc_id = SCID, owner = SCOwner} = Msg, StreamState) ->

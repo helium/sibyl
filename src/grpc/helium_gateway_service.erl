@@ -102,7 +102,7 @@ is_valid(Ctx, Message) -> helium_state_channels_impl:is_valid(Ctx, Message).
 close(Ctx, Message) -> helium_state_channels_impl:close(Ctx, Message).
 
 -spec follow(
-    gateway_pb:gateway_follow_req_v1_pb(),
+    gateway_pb:gateway_sc_follow_req_v1(),
     grpcbox_stream:t()
 ) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 follow(Msg, StreamState) -> helium_state_channels_impl:follow(Msg, StreamState).

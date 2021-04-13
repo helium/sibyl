@@ -80,7 +80,6 @@ init_per_testcase(TestCase, Config) ->
 
     %% connect the local node to the slaves
     LocalSwarm = blockchain_swarm:swarm(),
-    _LocalListenAddr = hd(libp2p_swarm:listen_addrs(LocalSwarm)),
     ok = lists:foreach(
         fun(Node) ->
             NodeSwarm = ct_rpc:call(Node, blockchain_swarm, swarm, [], 2000),
