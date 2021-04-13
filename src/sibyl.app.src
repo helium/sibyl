@@ -7,8 +7,7 @@
    [kernel,
     stdlib,
     lager,
-    grpcbox,
-    grpc_client
+    grpcbox
    ]},
   {included_applications, []},
   {env,[]},
