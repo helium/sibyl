@@ -27,7 +27,7 @@ clean:
 cover:
 	$(REBAR) cover
 
-test: | $(grpc_services_directory)
+test:
 	$(REBAR) as test do ct
 
 ci:
@@ -49,8 +49,3 @@ grpc:
 clean_grpc:
 	@echo "cleaning grpc services"
 	rm -rf $(grpc_services_directory)
-
-$(grpc_services_directory):
-	@echo "grpc service directory $(directory) does not exist, will generate services"
-	$(REBAR) get-deps
-	$(MAKE) grpc
