@@ -22,7 +22,6 @@ shell:
 	$(REBAR) shell
 
 clean:
-	rm -rf $(grpc_services_directory)
 	$(REBAR) clean
 
 cover:
