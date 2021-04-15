@@ -381,8 +381,8 @@ init_per_testcase(TestCase, Config) ->
                 ]
             ]),
 
-            {ok, StartedApps} = ct_rpc:call(Node, application, ensure_all_started, [blockchain]),
-            ct:pal("Node: ~p, StartedApps: ~p", [Node, StartedApps])
+            {ok, _StartedApps} = ct_rpc:call(Node, application, ensure_all_started, [blockchain]),
+            {ok, _StartedApps2} = ct_rpc:call(Node, application, ensure_all_started, [grpcbox])
         end,
         Nodes
     ),

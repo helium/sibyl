@@ -14,7 +14,7 @@ else
 MAKE="make"
 endif
 
-compile: | $(grpc_services_directory)
+compile:
 	$(REBAR) compile
 	$(REBAR) format
 
@@ -28,10 +28,10 @@ clean:
 cover:
 	$(REBAR) cover
 
-test: | $(grpc_services_directory)
+test:
 	$(REBAR) as test do ct
 
-ci: | $(grpc_services_directory)
+ci:
 	$(REBAR) do dialyzer,xref && $(REBAR) as test do eunit,ct,cover
 	$(REBAR) covertool generate
 	codecov --required -f _build/test/covertool/sibyl.covertool.xml
@@ -42,11 +42,15 @@ typecheck:
 doc:
 	$(REBAR) edoc
 
-grpc:
+grpc: | $(grpc_services_directory)
+	@echo "generating grpc services"
 	REBAR_CONFIG="config/grpc_server_gen.config" $(REBAR) grpc gen
 	REBAR_CONFIG="config/grpc_client_gen.config" $(REBAR) grpc gen
 
+clean_grpc:
+	@echo "cleaning grpc services"
+	rm -rf $(grpc_services_directory)
+
 $(grpc_services_directory):
-	@echo "grpc service directory $(directory) does not exist, will generate services"
+	@echo "grpc service directory $(directory) does not exist"
 	$(REBAR) get-deps
-	$(MAKE) grpc
