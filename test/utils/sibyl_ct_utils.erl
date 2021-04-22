@@ -381,14 +381,11 @@ init_per_testcase(TestCase, Config) ->
                 ]
             ]),
 
-            {ok, _StartedApps} = ct_rpc:call(Node, application, ensure_all_started, [blockchain]),
-            {ok, _StartedApps2} = ct_rpc:call(Node, application, ensure_all_started, [grpcbox])
+            {ok, _StartedApps2} = ct_rpc:call(Node, application, ensure_all_started, [grpcbox]),
+            {ok, _StartedApps} = ct_rpc:call(Node, application, ensure_all_started, [blockchain])
         end,
         Nodes
     ),
-
-    %% check that the config loaded correctly on each node
-    true = lists:all(fun(Res) -> Res == ok end, ConfigResult),
 
     %% accumulate the listen addr of all the nodes
     Addrs = pmap(
