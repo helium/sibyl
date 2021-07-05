@@ -14,8 +14,10 @@
     make_event/1,
     make_event/2,
     make_sc_topic/1,
+    make_poc_topic/1,
     encode_gateway_resp_v1/3,
     to_routing_pb/1,
+    address_data/1,
     ensure/2,
     ensure/3
 ]).
@@ -31,6 +33,9 @@ make_event(EventType, EventPayload) ->
 make_sc_topic(SCID) ->
     <<?EVENT_STATE_CHANNEL_UPDATE/binary, SCID/binary>>.
 
+make_poc_topic(GatewayAddr) ->
+    <<?EVENT_POC_NOTIFICATION/binary, GatewayAddr/binary>>.
+
 -spec encode_gateway_resp_v1(
     gateway_resp_type(),
     non_neg_integer(),
@@ -41,11 +46,19 @@ encode_gateway_resp_v1(#gateway_sc_is_active_resp_v1_pb{} = Msg, Height, SigFun)
 encode_gateway_resp_v1(#gateway_sc_is_overpaid_resp_v1_pb{} = Msg, Height, SigFun) ->
     do_encode_gateway_resp_v1({is_overpaid_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_sc_close_resp_v1_pb{} = Msg, Height, SigFun) ->
-    do_encode_gateway_resp_v1({close_resp, Msg}, Height, SigFun);
+    do_encode_gateway_resp_v1({sc_close_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_sc_follow_streamed_resp_v1_pb{} = Msg, Height, SigFun) ->
-    do_encode_gateway_resp_v1({follow_streamed_resp, Msg}, Height, SigFun);
+    do_encode_gateway_resp_v1({sc_follow_streamed_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_routing_streamed_resp_v1_pb{} = Msg, Height, SigFun) ->
-    do_encode_gateway_resp_v1({routing_streamed_resp, Msg}, Height, SigFun).
+    do_encode_gateway_resp_v1({routing_streamed_resp, Msg}, Height, SigFun);
+encode_gateway_resp_v1(#gateway_poc_challenge_notification_resp_v1_pb{} = Msg, Height, SigFun) ->
+    do_encode_gateway_resp_v1({poc_challenge_resp, Msg}, Height, SigFun);
+encode_gateway_resp_v1(#gateway_poc_check_challenge_target_resp_v1_pb{} = Msg, Height, SigFun) ->
+    do_encode_gateway_resp_v1({poc_check_target_resp, Msg}, Height, SigFun);
+encode_gateway_resp_v1(#gateway_success_resp_pb{} = Msg, Height, SigFun) ->
+    do_encode_gateway_resp_v1({success_resp, Msg}, Height, SigFun);
+encode_gateway_resp_v1(#gateway_error_resp_pb{} = Msg, Height, SigFun) ->
+    do_encode_gateway_resp_v1({error_resp, Msg}, Height, SigFun).
 
 -spec to_routing_pb(blockchain_ledger_routing_v1:routing()) -> gateway_pb:gateway_routing_pb().
 to_routing_pb(Route) ->
@@ -145,7 +158,8 @@ address_data([], Hosts) ->
 address_data([PubKeyAddress | Rest], Hosts) ->
     case check_for_public_ip(PubKeyAddress) of
         {ok, IP} ->
-            Address = #routing_address_pb{pub_key = PubKeyAddress, uri = format_ip(IP)},
+            {Port, SSL} = grpc_port(PubKeyAddress),
+            Address = #routing_address_pb{pub_key = PubKeyAddress, uri = format_ip(IP, SSL, Port)},
             lager:debug("address data ~p", [Address]),
             address_data(Rest, [Address | Hosts]);
         {error, _Reason} ->
@@ -167,7 +181,12 @@ check_for_public_ip(PubKeyBin) ->
                     check_for_alias(SwarmTID, PubKeyBin);
                 _ ->
                     [H | _] = libp2p_transport:sort_addrs_with_keys(SwarmTID, ClearedListenAddrs),
-                    has_addr_public_ip(H)
+                    case has_addr_public_ip(H) of
+                        {error, no_public_ip} ->
+                            check_for_alias(SwarmTID, PubKeyBin);
+                        Res ->
+                            Res
+                    end
             end;
         {error, not_found} ->
             %% we dont have this peer in our peerbook, check if we have an alias for it
@@ -189,19 +208,25 @@ check_for_alias(SwarmTID, PubKeyBin) ->
             {ok, list_to_binary(inet:ntoa(IPTuple))}
     end.
 
+-spec grpc_port(libp2p_crypto:pubkey_bin()) -> {pos_integer(), boolean()}.
+grpc_port(PubKeyBin) ->
+    MAddr = libp2p_crypto:pubkey_bin_to_p2p(PubKeyBin),
+    Aliases = application:get_env(sibyl, node_grpc_port_aliases, []),
+    case lists:keyfind(MAddr, 1, Aliases) of
+        false ->
+            {ok, [GrpcOpts]} = application:get_env(grpcbox, servers),
+            #{listen_opts := #{port := Port}, transport_opts := #{ssl := SSL}} = GrpcOpts,
+            {Port, SSL};
+        {MAddr, {Port, SSL}} ->
+            {Port, SSL}
+    end.
+
 -spec has_addr_public_ip({non_neg_integer(), string()}) -> {ok, binary()} | {error, atom()}.
 has_addr_public_ip({1, Addr}) ->
     [_, _, IP, _, _Port] = re:split(Addr, "/"),
     {ok, IP};
 has_addr_public_ip({_, _Addr}) ->
     {error, no_public_ip}.
-
--spec format_ip(binary()) -> binary().
-format_ip(IP) ->
-    {ok, [GrpcOpts]} = application:get_env(grpcbox, servers),
-    #{listen_opts := #{port := Port}, transport_opts := #{ssl := SSL}} = GrpcOpts,
-    lager:debug("ip: ~p, ssl: ~p, port: ~p", [IP, SSL, Port]),
-    format_ip(IP, SSL, Port).
 
 -spec format_ip(binary(), boolean(), non_neg_integer()) -> binary().
 format_ip(IP, true, Port) ->

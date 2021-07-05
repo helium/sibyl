@@ -94,7 +94,9 @@ close_sc(Ctx, #gateway_sc_close_req_v1_pb{} = Message) ->
 ) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 follow_sc(#gateway_sc_follow_req_v1_pb{sc_id = SCID, sc_owner = SCOwner} = Msg, StreamState) ->
     Chain = sibyl_mgr:blockchain(),
-    #handler_state{sc_follows = SCFollows} = grpcbox_stream:stream_handler_state(StreamState),
+    #handler_state{sc_follows = SCFollows} =
+        HandlerState = grpcbox_stream:stream_handler_state(StreamState),
+    StreamState0 = maybe_init_stream_state(HandlerState, StreamState),
     Key = blockchain_ledger_v1:state_channel_key(SCID, SCOwner),
     follow_sc(Chain, maps:is_key(Key, SCFollows), Msg, StreamState).
 
@@ -217,7 +219,7 @@ close_sc(_Chain, Ctx, #gateway_sc_close_req_v1_pb{close_txn = CloseTxn} = _Messa
 -spec follow_sc(
     blockchain:blockchain(),
     boolean(),
-    gateway_pb:gateway_follow_req_v1_pb(),
+    gateway_pb:gateway_sc_follow_req_v1_pb(),
     grpcbox_stream:t()
 ) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 follow_sc(
@@ -695,3 +697,15 @@ deserialize_sc(SC = <<1, _/binary>>) ->
     {v1, blockchain_ledger_state_channel_v1:deserialize(SC)};
 deserialize_sc(SC = <<2, _/binary>>) ->
     {v2, blockchain_ledger_state_channel_v2:deserialize(SC)}.
+
+-spec maybe_init_stream_state(undefined | #handler_state{}, grpcbox_stream:t()) ->
+    grpcbox_stream:t().
+maybe_init_stream_state(undefined, StreamState) ->
+    lager:debug("handler init, stream state ~p", [StreamState]),
+    NewStreamState = grpcbox_stream:stream_handler_state(
+        StreamState,
+        #handler_state{}
+    ),
+    NewStreamState;
+maybe_init_stream_state(_HandlerState, StreamState) ->
+    StreamState.

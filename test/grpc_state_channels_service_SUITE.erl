@@ -449,6 +449,7 @@ is_overpaid_sc_test(Config) ->
         ResponseMsg2
     ),
 
+    %%    timer:sleep(20000),
     ok.
 
 close_sc_test(Config) ->
@@ -539,7 +540,7 @@ close_sc_test(Config) ->
     {ok, #{
         headers := Headers,
         result := #{
-            msg := {close_resp, ResponseMsg},
+            msg := {sc_close_resp, ResponseMsg},
             height := _ResponseHeight,
             signature := _ResponseSig
         } = Result
@@ -659,19 +660,26 @@ follow_sc_test(Config) ->
     {ok, Stream} = grpc_client:new_stream(
         Connection,
         'helium.gateway',
-        follow_sc,
+        stream,
         gateway_client_pb
     ),
 
     %% setup the follows for the two SCs
     ?assertEqual(ID1, ActiveSCID),
+
     ok = grpc_client:send(Stream, #{
-        sc_id => ID1,
-        sc_owner => blockchain_ledger_state_channel_v2:owner(SC1)
+        msg =>
+            {follow_req, #{
+                sc_id => ID1,
+                sc_owner => blockchain_ledger_state_channel_v2:owner(SC1)
+            }}
     }),
     ok = grpc_client:send(Stream, #{
-        sc_id => ID2,
-        sc_owner => blockchain_ledger_state_channel_v2:owner(SC2)
+        msg =>
+            {follow_req, #{
+                sc_id => ID2,
+                sc_owner => blockchain_ledger_state_channel_v2:owner(SC2)
+            }}
     }),
     ok = timer:sleep(timer:seconds(2)),
 

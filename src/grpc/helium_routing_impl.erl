@@ -8,28 +8,18 @@
 }).
 
 -export([
-    init/2,
     handle_info/2,
     routing/2
 ]).
-
--spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
-init(_RPC, StreamState) ->
-    lager:debug("handler init, stream state ~p", [StreamState]),
-    NewStreamState = grpcbox_stream:stream_handler_state(
-        StreamState,
-        #handler_state{
-            initialized = false
-        }
-    ),
-    NewStreamState.
 
 -spec routing(gateway_pb:gateway_routing_req_v1_pb(), grpcbox_stream:t()) ->
     {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 routing(#gateway_routing_req_v1_pb{height = ClientHeight} = Msg, StreamState) ->
     lager:debug("RPC routing called with height ~p", [ClientHeight]),
-    #handler_state{initialized = Initialized} = grpcbox_stream:stream_handler_state(StreamState),
-    routing(Initialized, sibyl_mgr:blockchain(), Msg, StreamState).
+    HandlerState = grpcbox_stream:stream_handler_state(StreamState),
+    StreamState0 = maybe_init_stream_state(HandlerState, StreamState),
+    #handler_state{initialized = Initialized} = grpcbox_stream:stream_handler_state(StreamState0),
+    routing(Initialized, sibyl_mgr:blockchain(), Msg, StreamState0).
 
 -spec routing(
     boolean(),
@@ -40,7 +30,7 @@ routing(#gateway_routing_req_v1_pb{height = ClientHeight} = Msg, StreamState) ->
 routing(_Initialized, undefined = _Chain, #gateway_routing_req_v1_pb{} = _Msg, _StreamState) ->
     % if chain not up we have no way to return routing data so just return a 14/503
     lager:debug("chain not ready, returning error response"),
-    {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavavailable">>}};
+    {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 routing(
     false = _Initialized,
     _Chain,
@@ -175,3 +165,17 @@ is_data_modified(ClientLastHeight, LastModifiedHeight) when
     ClientLastHeight < LastModifiedHeight;
 is_data_modified(_ClientLastHeight, _LastModifiedHeight) ->
     true.
+
+-spec maybe_init_stream_state(undefined | #handler_state{}, grpcbox_stream:t()) ->
+    grpcbox_stream:t().
+maybe_init_stream_state(undefined, StreamState) ->
+    lager:debug("handler init, stream state ~p", [StreamState]),
+    NewStreamState = grpcbox_stream:stream_handler_state(
+        StreamState,
+        #handler_state{
+            initialized = false
+        }
+    ),
+    NewStreamState;
+maybe_init_stream_state(_HandlerState, StreamState) ->
+    StreamState.

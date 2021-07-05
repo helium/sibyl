@@ -152,7 +152,7 @@ init_per_testcase(TestCase, Config) ->
     {ok, Stream} = grpc_client:new_stream(
         Connection,
         'helium.gateway',
-        routing,
+        stream,
         gateway_client_pb
     ),
 
@@ -196,7 +196,7 @@ routing_updates_with_initial_msg_test(Config) ->
     OUI1 = ?config(oui1, Config),
 
     %% send the initial msg from the client with its safe height value
-    grpc_client:send(Stream, #{height => 1}),
+    grpc_client:send(Stream, #{msg => {routing_req, #{height => 1}}}),
 
     %% we expect to receive a response containing all the added routes from the init_per_testcase step
     %% we will receive this as our client height value is less that the last modified height for route updates
@@ -269,6 +269,8 @@ routing_updates_with_initial_msg_test(Config) ->
     {ok, ExpRoutes2} = blockchain_ledger_v1:get_routes(Ledger),
     ct:pal("Expected routes 1 ~p", [ExpRoutes2]),
 
+    timer:sleep(20000),
+
     {data, Routes2} = grpc_client:rcv(Stream, 5000),
     ct:pal("Route Update: ~p", [Routes2]),
     assert_route_update(Routes2, ExpRoutes2),
@@ -293,7 +295,7 @@ routing_updates_without_initial_msg_test(Config) ->
     ClientHeaderHeight = CurHeight0 + 1,
 
     %% the stream requires an empty msg to be sent in order to initialise the service
-    grpc_client:send(Stream, #{height => ClientHeaderHeight}),
+    grpc_client:send(Stream, #{msg => {routing_req, #{height => ClientHeaderHeight}}}),
 
     %% we do not expect to receive a response containing all the added routes from the init_per_testcase step
     %% this is because the client supplied a height value greater than the height at which routes were last modified
