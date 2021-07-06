@@ -184,7 +184,7 @@ check_for_alias(SwarmTID, PubKeyBin) ->
                 libp2p_transport:for_addr(SwarmTID, AliasAddr),
             %% hmm ignore transport for now, assume tcp TODO: revisit
             {IPTuple, _, _, _} = libp2p_transport_tcp:tcp_addr(AliasAddr),
-            {ok, format_ip(list_to_binary(inet:ntoa(IPTuple)))}
+            {ok, list_to_binary(inet:ntoa(IPTuple))}
     end.
 
 -spec has_addr_public_ip({non_neg_integer(), string()}) -> {ok, binary()} | {error, atom()}.
