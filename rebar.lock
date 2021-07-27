@@ -65,7 +65,7 @@
   1},
  {<<"grpcbox">>,
   {git,"https://github.com/andymck/grpcbox.git",
-       {ref,"550c2b6d6327f8fdfe2c6f1f91c00c428ba6a16c"}},
+       {ref,"9f777ad02cd510c6576c05465d6a989bffd23c04"}},
   0},
  {<<"h3">>,
   {git,"https://github.com/helium/erlang-h3.git",
