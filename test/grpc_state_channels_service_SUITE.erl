@@ -268,10 +268,10 @@ is_valid_sc_test(Config) ->
         timer:seconds(1)
     ),
 
-    ActiveSCID = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, []),
+    [ActiveSCID] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_ids, []),
     %% pull the active SC from the router node, confirm it has same ID as one from ledger
     %% and then use it to test the is_valid GRPC api
-    ActiveSCPB = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc, []),
+    [ActiveSCPB] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_scs, []),
     ct:pal("ActiveSCPB: ~p", [ActiveSCPB]),
     ActiveSCMap = ?record_to_map(blockchain_state_channel_v1_pb, ActiveSCPB),
 
@@ -367,9 +367,9 @@ close_sc_test(Config) ->
     ),
 
     %% get the open state channels ID
-    ActiveSCID = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, []),
+    [ActiveSCID] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_ids, []),
     %% pull the active SC from the router node, we will need it in for our close txn
-    ActiveSCPB = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc, []),
+    [ActiveSCPB] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_scs, []),
     ct:pal("ActiveSCPB: ~p", [ActiveSCPB]),
 
     %% setup the close txn, first as records
@@ -499,9 +499,9 @@ follow_sc_test(Config) ->
     ),
 
     %% get the open state channels ID
-    ActiveSCID = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, []),
+    [ActiveSCID] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_ids, []),
     %% pull the active SC from the router node, we will need it in for our close txn
-    ActiveSCPB = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc, []),
+    [ActiveSCPB] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_scs, []),
     ct:pal("ActiveSCPB: ~p", [ActiveSCPB]),
 
     %% setup a 'follow' streamed connection to server
@@ -617,7 +617,7 @@ follow_sc_test(Config) ->
     %%
     %% SC1 is now closed, SC2 should be the active SC
     %%
-    ActiveSCID2 = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_id, []),
+    [ActiveSCID2] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_ids, []),
     ct:pal("ActiveSCID2: ~p", [ActiveSCID2]),
     %% check that the ids differ, make sure we have a new SC
     ?assertNotEqual(ActiveSCID, ActiveSCID2),
