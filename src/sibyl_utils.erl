@@ -4,12 +4,16 @@
 -include("grpc/autogen/server/gateway_pb.hrl").
 
 -type gateway_resp_type() ::
-    gateway_pb:gateway_routing_streamed_resp_v1_pb().
+    gateway_pb:gateway_sc_is_valid_resp_v1_pb()
+    | gateway_pb:gateway_sc_close_resp_v1_pb()
+    | gateway_pb:gateway_sc_follow_streamed_resp_v1_pb()
+    | gateway_pb:gateway_routing_streamed_resp_v1_pb().
 
 %% API
 -export([
     make_event/1,
     make_event/2,
+    make_sc_topic/1,
     encode_gateway_resp_v1/3,
     to_routing_pb/1,
     ensure/2,
@@ -20,15 +24,24 @@
 make_event(EventType) ->
     {event, EventType}.
 
--spec make_event(binary(), binary()) -> sibyl_mgr:event().
+-spec make_event(binary(), any()) -> sibyl_mgr:event().
 make_event(EventType, EventPayload) ->
     {event, EventType, EventPayload}.
+
+make_sc_topic(SCID) ->
+    <<?EVENT_STATE_CHANNEL_UPDATE/binary, SCID/binary>>.
 
 -spec encode_gateway_resp_v1(
     gateway_resp_type(),
     non_neg_integer(),
     function()
 ) -> gateway_pb:gateway_resp_v1_pb().
+encode_gateway_resp_v1(#gateway_sc_is_valid_resp_v1_pb{} = Msg, Height, SigFun) ->
+    do_encode_gateway_resp_v1({is_valid_resp, Msg}, Height, SigFun);
+encode_gateway_resp_v1(#gateway_sc_close_resp_v1_pb{} = Msg, Height, SigFun) ->
+    do_encode_gateway_resp_v1({close_resp, Msg}, Height, SigFun);
+encode_gateway_resp_v1(#gateway_sc_follow_streamed_resp_v1_pb{} = Msg, Height, SigFun) ->
+    do_encode_gateway_resp_v1({follow_streamed_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_routing_streamed_resp_v1_pb{} = Msg, Height, SigFun) ->
     do_encode_gateway_resp_v1({routing_streamed_resp, Msg}, Height, SigFun).
 
@@ -61,7 +74,7 @@ ensure(number, Value) when is_atom(Value) ->
 ensure(number, Value) when is_binary(Value) ->
     ensure(number, binary_to_list(Value));
 ensure(number, Value) when is_list(Value) ->
-    p_list_to_num(Value);
+    list_to_num(Value);
 ensure(integer, Value) when is_atom(Value) ->
     ensure(integer, atom_to_list(Value));
 ensure(integer, Value) when is_binary(Value) ->
@@ -171,7 +184,7 @@ check_for_alias(SwarmTID, PubKeyBin) ->
                 libp2p_transport:for_addr(SwarmTID, AliasAddr),
             %% hmm ignore transport for now, assume tcp TODO: revisit
             {IPTuple, _, _, _} = libp2p_transport_tcp:tcp_addr(AliasAddr),
-            {ok, format_ip(list_to_binary(inet:ntoa(IPTuple)))}
+            {ok, list_to_binary(inet:ntoa(IPTuple))}
     end.
 
 -spec has_addr_public_ip({non_neg_integer(), string()}) -> {ok, binary()} | {error, atom()}.
@@ -196,7 +209,7 @@ format_ip(IP, true, Port) ->
 format_ip(IP, false, Port) ->
     list_to_binary(uri_string:normalize(#{scheme => "http", port => Port, host => IP, path => ""})).
 
-p_list_to_num(V) ->
+list_to_num(V) ->
     try
         list_to_float(V)
     catch

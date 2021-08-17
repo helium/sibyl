@@ -37,7 +37,7 @@ all() ->
 %%--------------------------------------------------------------------
 init_per_testcase(TestCase, Config) ->
     %% setup test dirs
-    Config0 = test_utils:init_base_dir_config(?MODULE, TestCase, Config),
+    Config0 = sibyl_ct_utils:init_base_dir_config(?MODULE, TestCase, Config),
     LogDir = ?config(log_dir, Config0),
     application:ensure_all_started(lager),
     lager:set_loglevel(lager_console_backend, debug),
@@ -45,20 +45,71 @@ init_per_testcase(TestCase, Config) ->
 
     application:ensure_all_started(grpcbox),
 
-    Config1 = test_utils:init_per_testcase(TestCase, Config0),
+    Config1 = sibyl_ct_utils:init_per_testcase(TestCase, Config0),
+    Nodes = ?config(nodes, Config1),
+    GenesisBlock = ?config(genesis_block, Config1),
 
+    %% start a local blockchain
+    #{public := LocalNodePubKey, secret := LocalNodePrivKey} = libp2p_crypto:generate_keys(
+        ecc_compact
+    ),
+    BaseDir = ?config(base_dir, Config1),
+    LocalNodeSigFun = libp2p_crypto:mk_sig_fun(LocalNodePrivKey),
+    LocalNodeECDHFun = libp2p_crypto:mk_ecdh_fun(LocalNodePrivKey),
+    Opts = [
+        {key, {LocalNodePubKey, LocalNodeSigFun, LocalNodeECDHFun}},
+        {seed_nodes, []},
+        {port, 0},
+        {num_consensus_members, 7},
+        {base_dir, BaseDir}
+    ],
+    application:set_env(blockchain, peer_cache_timeout, 10000),
+    application:set_env(blockchain, peerbook_update_interval, 200),
+    application:set_env(blockchain, peerbook_allow_rfc1918, true),
+    application:set_env(blockchain, listen_interface, "127.0.0.1"),
+    application:set_env(blockchain, max_inbound_connections, length(Nodes) * 2),
+    application:set_env(blockchain, outbound_gossip_connections, length(Nodes) * 2),
+
+    {ok, Sup} = blockchain_sup:start_link(Opts),
+
+    %% load the genesis block on the local node
+    blockchain_worker:integrate_genesis_block(GenesisBlock),
+
+    %% wait until the local node has the genesis block
+    ok = sibyl_ct_utils:wait_until_local_height(1),
+
+    %% connect the local node to the slaves
+    LocalSwarm = blockchain_swarm:swarm(),
+    ok = lists:foreach(
+        fun(Node) ->
+            NodeSwarm = ct_rpc:call(Node, blockchain_swarm, swarm, [], 2000),
+            [H | _] = ct_rpc:call(Node, libp2p_swarm, listen_addrs, [NodeSwarm], 2000),
+            libp2p_swarm:connect(LocalSwarm, H)
+        end,
+        Nodes
+    ),
+    LocalGossipPeers = blockchain_swarm:gossip_peers(),
+    ct:pal("local node connected to ~p peers", [length(LocalGossipPeers)]),
+
+    %% now that all nodes are up and connected, start sibyl
     {ok, SibylSupPid} = sibyl_sup:start_link(),
     %% give time for the mgr to be initialised with chain
-    test_utils:wait_until(fun() -> sibyl_mgr:blockchain() =/= undefined end),
+    ok = sibyl_ct_utils:wait_until(
+        fun() ->
+            sibyl_mgr:blockchain() =/= undefined
+        end,
+        100,
+        100
+    ),
 
-    %% setup come onchain requirements
-    Swarm = ?config(swarm, Config1),
+    %% setup come onchain requirements for the local node
+    Swarm = blockchain_swarm:swarm(),
     ConsensusMembers = ?config(consensus_members, Config1),
     Chain = blockchain_worker:blockchain(),
+    ct:pal("localchain : ~p", [Chain]),
     Ledger = blockchain:ledger(Chain),
-
-    [_, {Payer, {_, PayerPrivKey, _}} | _] = ConsensusMembers,
-    SigFun = libp2p_crypto:mk_sig_fun(PayerPrivKey),
+    [{_Addr, PayerPubKey, PayerSigFun} | _] = ConsensusMembers,
+    PayerPubKeyBin = libp2p_crypto:pubkey_to_bin(PayerPubKey),
 
     meck:new(blockchain_txn_oui_v1, [no_link, passthrough]),
     meck:expect(blockchain_ledger_v1, check_dc_or_hnt_balance, fun(_, _, _, _) -> ok end),
@@ -67,21 +118,21 @@ init_per_testcase(TestCase, Config) ->
     OUI1 = 1,
     Addresses0 = [libp2p_swarm:pubkey_bin(Swarm)],
     {Filter, _} = xor16:to_bin(xor16:new([], fun xxhash:hash64/1)),
-    OUITxn0 = blockchain_txn_oui_v1:new(OUI1, Payer, Addresses0, Filter, 8),
-    SignedOUITxn0 = blockchain_txn_oui_v1:sign(OUITxn0, SigFun),
+    OUITxn0 = blockchain_txn_oui_v1:new(OUI1, PayerPubKeyBin, Addresses0, Filter, 8),
+    SignedOUITxn0 = blockchain_txn_oui_v1:sign(OUITxn0, PayerSigFun),
 
     %% confirm we have no routing data at this point
     %% then add the OUI block
     ?assertEqual({error, not_found}, blockchain_ledger_v1:find_routing(OUI1, Ledger)),
 
-    {ok, Block0} = blockchain_test_utils:create_block(ConsensusMembers, [SignedOUITxn0]),
+    {ok, Block0} = sibyl_ct_utils:create_block(ConsensusMembers, [SignedOUITxn0]),
     _ = blockchain_gossip_handler:add_block(Block0, Chain, self(), blockchain_swarm:swarm()),
 
-    ok = test_utils:wait_until(fun() -> {ok, 2} == blockchain:height(Chain) end),
+    ok = sibyl_ct_utils:wait_until(fun() -> {ok, 2} == blockchain:height(Chain) end),
 
     Routing0 = blockchain_ledger_routing_v1:new(
         OUI1,
-        Payer,
+        PayerPubKeyBin,
         Addresses0,
         Filter,
         <<0:25/integer-unsigned-big,
@@ -91,7 +142,7 @@ init_per_testcase(TestCase, Config) ->
     ?assertEqual({ok, Routing0}, blockchain_ledger_v1:find_routing(OUI1, Ledger)),
 
     %% wait until the ledger hook for the OUI above has fired and been processed by sibyl mgr
-    ok = test_utils:wait_until(fun() ->
+    ok = sibyl_ct_utils:wait_until(fun() ->
         2 == sibyl_mgr:get_last_modified(?EVENT_ROUTING_UPDATES_END)
     end),
 
@@ -100,15 +151,16 @@ init_per_testcase(TestCase, Config) ->
     %% routes_v1 = service, stream_route_updates = RPC call, routes_v1 = decoder, ie the PB generated encode/decode file
     {ok, Stream} = grpc_client:new_stream(
         Connection,
-        'helium.gateway_routing',
+        'helium.gateway',
         routing,
         gateway_client_pb
     ),
 
     [
+        {sup, Sup},
         {sibyl_sup, SibylSupPid},
-        {payer, Payer},
-        {payer_sig_fun, SigFun},
+        {payer, PayerPubKeyBin},
+        {payer_sig_fun, PayerSigFun},
         {chain, Chain},
         {ledger, Ledger},
         {grpc_connection, Connection},
@@ -122,10 +174,12 @@ init_per_testcase(TestCase, Config) ->
 %% TEST CASE TEARDOWN
 %%--------------------------------------------------------------------
 end_per_testcase(TestCase, Config) ->
+    meck:unload(blockchain_txn_oui_v1),
+    meck:unload(blockchain_ledger_v1),
     SibylSup = ?config(sibyl_sup, Config),
     application:stop(grpcbox),
     true = erlang:exit(SibylSup, normal),
-    test_utils:end_per_testcase(TestCase, Config).
+    sibyl_ct_utils:end_per_testcase(TestCase, Config).
 
 %%--------------------------------------------------------------------
 %% TEST CASES
@@ -133,7 +187,6 @@ end_per_testcase(TestCase, Config) ->
 
 routing_updates_with_initial_msg_test(Config) ->
     ConsensusMembers = ?config(consensus_members, Config),
-    _Swarm = ?config(swarm, Config),
     Chain = ?config(chain, Config),
     Ledger = ?config(ledger, Config),
     Payer = ?config(payer, Config),
@@ -152,7 +205,7 @@ routing_updates_with_initial_msg_test(Config) ->
     %% NOTE: the server will send the headers first before any data msg
     %%       but will only send them at the point of the first data msg being sent
     %% the headers will come in first, so assert those
-    {ok, Headers} = test_utils:wait_for(
+    {ok, Headers} = sibyl_ct_utils:wait_for(
         fun() ->
             case grpc_client:get(Stream) of
                 empty ->
@@ -184,10 +237,10 @@ routing_updates_with_initial_msg_test(Config) ->
     Addresses1 = [libp2p_crypto:pubkey_to_bin(PubKey1)],
     OUITxn1 = blockchain_txn_routing_v1:update_router_addresses(OUI1, Payer, Addresses1, 1),
     SignedOUITxn1 = blockchain_txn_routing_v1:sign(OUITxn1, SigFun),
-    {ok, Block1} = blockchain_test_utils:create_block(ConsensusMembers, [SignedOUITxn1]),
+    {ok, Block1} = sibyl_ct_utils:create_block(ConsensusMembers, [SignedOUITxn1]),
     _ = blockchain_gossip_handler:add_block(Block1, Chain, self(), blockchain_swarm:swarm()),
 
-    ok = test_utils:wait_until(fun() -> {ok, 3} == blockchain:height(Chain) end),
+    ok = sibyl_ct_utils:wait_until(fun() -> {ok, 3} == blockchain:height(Chain) end),
 
     %% get expected route data from the ledger to compare against the msg streamed to client
     %% confirm the ledger route has the updated addresses
@@ -207,10 +260,10 @@ routing_updates_with_initial_msg_test(Config) ->
     {Filter2, _} = xor16:to_bin(xor16:new([], fun xxhash:hash64/1)),
     OUITxn2 = blockchain_txn_oui_v1:new(OUI2, Payer, Addresses2, Filter2, 8),
     SignedOUITxn2 = blockchain_txn_oui_v1:sign(OUITxn2, SigFun),
-    {ok, Block2} = blockchain_test_utils:create_block(ConsensusMembers, [SignedOUITxn2]),
+    {ok, Block2} = sibyl_ct_utils:create_block(ConsensusMembers, [SignedOUITxn2]),
     _ = blockchain_gossip_handler:add_block(Block2, Chain, self(), blockchain_swarm:swarm()),
 
-    ok = test_utils:wait_until(fun() -> {ok, 4} == blockchain:height(Chain) end),
+    ok = sibyl_ct_utils:wait_until(fun() -> {ok, 4} == blockchain:height(Chain) end),
 
     %% get expected route data from the ledger to compare against the msg streamed to client
     {ok, ExpRoutes2} = blockchain_ledger_v1:get_routes(Ledger),
@@ -227,7 +280,6 @@ routing_updates_with_initial_msg_test(Config) ->
 
 routing_updates_without_initial_msg_test(Config) ->
     ConsensusMembers = ?config(consensus_members, Config),
-    _Swarm = ?config(swarm, Config),
     Chain = ?config(chain, Config),
     Ledger = ?config(ledger, Config),
     Payer = ?config(payer, Config),
@@ -258,10 +310,10 @@ routing_updates_without_initial_msg_test(Config) ->
     ct:pal("NewAddresses1: ~p", [Addresses1]),
     OUITxn1 = blockchain_txn_routing_v1:update_router_addresses(OUI1, Payer, Addresses1, 1),
     SignedOUITxn1 = blockchain_txn_routing_v1:sign(OUITxn1, SigFun),
-    {ok, Block1} = blockchain_test_utils:create_block(ConsensusMembers, [SignedOUITxn1]),
+    {ok, Block1} = sibyl_ct_utils:create_block(ConsensusMembers, [SignedOUITxn1]),
     _ = blockchain_gossip_handler:add_block(Block1, Chain, self(), blockchain_swarm:swarm()),
 
-    ok = test_utils:wait_until(fun() -> {ok, 3} == blockchain:height(Chain) end),
+    ok = sibyl_ct_utils:wait_until(fun() -> {ok, 3} == blockchain:height(Chain) end),
 
     %% get expected route data from the ledger to compare against the msg streamed to client
     %% confirm the ledger route has the updated addresses
@@ -272,7 +324,7 @@ routing_updates_without_initial_msg_test(Config) ->
     %% NOTE: the server will send the headers first before any data msg
     %%       but will only send them at the point of the first data msg being sent
     %% the headers will come in first, so assert those
-    {ok, Headers1} = test_utils:wait_for(
+    {ok, Headers1} = sibyl_ct_utils:wait_for(
         fun() ->
             case grpc_client:get(Stream) of
                 empty ->

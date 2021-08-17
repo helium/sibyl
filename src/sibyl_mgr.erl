@@ -10,6 +10,7 @@
 -define(SIGFUN, sigfun).
 -define(SERVER, ?MODULE).
 -define(ROUTING_CF_NAME, routing).
+-define(STATE_CHANNEL_CF_NAME, state_channels).
 
 -type event_type() :: binary().
 -type event_types() :: [event_type()].
@@ -216,15 +217,55 @@ add_commit_hooks() ->
         (_CFName, _ChangedKeys) ->
             noop
     end,
-    Ref = blockchain_worker:add_commit_hook(
+    RoutingRef = blockchain_worker:add_commit_hook(
         ?ROUTING_CF_NAME,
         RouteUpdateIncrementalFun,
         RouteUpdatesEndFun
     ),
-    {ok, [Ref]}.
+
+    %% State Channel Related Hooks
+    %% we are interested in receiving incremental/partial updates of route data
+    SCUpdateIncrementalFun = fun(Updates) ->
+        lager:debug("handling SC Updates ~p", [Updates]),
+        lists:foreach(
+            fun
+                ({_CF, put, Key, Value}) ->
+                    %% note: the key will be a combo of <<owner, sc_id>>
+                    SCTopic = sibyl_utils:make_sc_topic(Key),
+                    lager:debug("publishing SC put event for key ~p and topic ~p", [Key, SCTopic]),
+                    sibyl_bus:pub(
+                        SCTopic,
+                        sibyl_utils:make_event(SCTopic, {put, Key, Value})
+                    );
+                ({_CF, delete, Key}) ->
+                    %% note: the key will be a combo of <<owner, sc_id>>
+                    SCTopic = sibyl_utils:make_sc_topic(Key),
+                    lager:debug("publishing SC delete event for key ~p and topic ~p", [Key, SCTopic]),
+                    sibyl_bus:pub(
+                        SCTopic,
+                        sibyl_utils:make_event(SCTopic, {delete, Key})
+                    );
+                (_Other) ->
+                    lager:debug("got unknown event for SC ~p", [_Other]),
+                    noop
+            end,
+            Updates
+        )
+    end,
+    %% we do NOT want to be receive events of when there have been state channels updates
+    %% and those updates for the current block have *all* been applied
+    SCUpdatesEndFun = fun(_CFName, _Update) -> noop end,
+
+    SCRef = blockchain_worker:add_commit_hook(
+        ?STATE_CHANNEL_CF_NAME,
+        SCUpdateIncrementalFun,
+        SCUpdatesEndFun
+    ),
+    lager:debug("*** added commit hooks ~p ~p", [RoutingRef, SCRef]),
+    {ok, [RoutingRef, SCRef]}.
 
 -spec subscribe_to_events() -> ok.
 subscribe_to_events() ->
     %% subscribe to events the mgr is interested in
-    [sibyl_bus:sub(E, self()) || E <- [?EVENT_ROUTING_UPDATES_END]],
+    [sibyl_bus:sub(E, self()) || E <- [?EVENT_ROUTING_UPDATES_END, ?EVENT_STATE_CHANNEL_UPDATE]],
     ok.

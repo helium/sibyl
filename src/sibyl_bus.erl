@@ -34,19 +34,24 @@ pub(Topic, Message) ->
 -else.
 
 start() ->
-    pg2:start_link(),
-    %% for pg2, need to create the desired topics/groups
-    [pg2:create(G) || G <- ?ALL_EVENTS].
+    pg2:start_link().
 
 sub(Topic, Subscriber) ->
+    %% for pg2, need to create the desired topics/groups before we can join
+    %% so just issue a create here, if already exists, it will be ignored
+    pg2:create(Topic),
     pg2:join(Topic, Subscriber).
 
 leave(Topic, Subscriber) ->
     pg2:leave(Topic, Subscriber).
 
 pub(Topic, Message) ->
-    Members = pg2:get_local_members(Topic),
-    send_to_members(Members, Message).
+    case pg2:get_local_members(Topic) of
+        {error, _} ->
+            ok;
+        Members ->
+            send_to_members(Members, Message)
+    end.
 
 -endif.
 
