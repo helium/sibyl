@@ -30,6 +30,7 @@
     ledger/2,
     destroy_ledger/0,
     add_and_gossip_fake_blocks/6,
+    local_add_and_gossip_fake_blocks/5,
     add_block/4,
     create_oui_txn/4,
     setup_meck_txn_forwarding/2,
@@ -255,7 +256,7 @@ init_per_suite(Config) ->
     application:ensure_all_started(ranch),
     application:set_env(lager, error_logger_flush_queue, false),
     application:ensure_all_started(lager),
-    lager:set_loglevel(lager_console_backend, debug),
+    lager:set_loglevel(lager_console_backend, info),
     application:ensure_all_started(throttle),
     Config.
 
@@ -305,7 +306,7 @@ init_per_testcase(TestCase, Config) ->
             %% give each node its own log directory
             LogRoot = LogDir ++ "_" ++ atom_to_list(Node),
             ct_rpc:call(Node, application, set_env, [lager, log_root, LogRoot]),
-            ct_rpc:call(Node, lager, set_loglevel, [{lager_file_backend, "log/console.log"}, debug]),
+            ct_rpc:call(Node, lager, set_loglevel, [{lager_file_backend, "log/console.log"}, info]),
 
             %% set blockchain configuration
             #{public := PubKey, secret := PrivKey} = libp2p_crypto:generate_keys(ecc_compact),
@@ -507,6 +508,7 @@ initialize_nodes(Config) ->
     ConsensusAddrs = lists:sublist(lists:sort(Addrs), NumConsensusMembers),
     DefaultVars = #{num_consensus_members => NumConsensusMembers},
     ExtraVars = #{
+        sc_version => 1,
         max_open_sc => 2,
         min_expire_within => 10,
         max_xor_filter_size => 1024 * 100,
@@ -832,6 +834,15 @@ add_and_gossip_fake_blocks(NumFakeBlocks, ConsensusMembers, Node, Swarm, Chain, 
         lists:seq(1, NumFakeBlocks)
     ).
 
+local_add_and_gossip_fake_blocks(NumFakeBlocks, ConsensusMembers, Swarm, Chain, From) ->
+    lists:foreach(
+        fun(_) ->
+            {ok, B} = sibyl_ct_utils:create_block(ConsensusMembers, []),
+            _ = blockchain_gossip_handler:add_block(B, Chain, From, Swarm),
+            timer:sleep(50)
+        end,
+        lists:seq(1, NumFakeBlocks)
+    ).
 %% ------------------------------------------------------------------
 %% Internal functions
 %% ------------------------------------------------------------------

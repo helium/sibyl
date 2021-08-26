@@ -73,7 +73,6 @@ handle_info(_RPC = is_valid, Msg, StreamState) ->
 handle_info(_RPC = close, Msg, StreamState) ->
     helium_state_channels_impl:handle_info(Msg, StreamState);
 handle_info(_RPC = follow, Msg, StreamState) ->
-    lager:warning("got follow info msg, RPC ~p, Msg, ~p", [_RPC, Msg]),
     helium_state_channels_impl:handle_info(Msg, StreamState);
 handle_info(_RPC, _Msg, StreamState) ->
     lager:warning("got unhandled info msg, RPC ~p, Msg, ~p", [_RPC, _Msg]),

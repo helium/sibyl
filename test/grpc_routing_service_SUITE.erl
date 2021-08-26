@@ -299,10 +299,22 @@ routing_updates_without_initial_msg_test(Config) ->
     %% this is because the client supplied a height value greater than the height at which routes were last modified
     %% we wont get streaming updates for those as the grpc connection was established after those routes were added
 
-    %% give a lil time for the handler to spawn on the peer and then confirm we get no msgs from the handler
+    %% give a lil time for the handler to spawn on the peer and then confirm we get the grpc headers
     %% we will only receive our first data msg after the next route update
     timer:sleep(500),
-    empty = grpc_client:get(Stream),
+    {ok, Headers1} = sibyl_ct_utils:wait_for(
+        fun() ->
+            case grpc_client:get(Stream) of
+                empty ->
+                    false;
+                {headers, Headers} ->
+                    {true, Headers}
+            end
+        end
+    ),
+    ct:pal("Response Headers: ~p", [Headers1]),
+    #{<<":status">> := HttpStatus} = Headers1,
+    ?assertEqual(HttpStatus, <<"200">>),
 
     %% update the existing route - confirm we get a streamed update of the updated route - should remain a single route
     #{public := PubKey1, secret := _PrivKey1} = libp2p_crypto:generate_keys(ed25519),
@@ -320,23 +332,6 @@ routing_updates_without_initial_msg_test(Config) ->
     {ok, [ExpRoute1] = ExpRoutes1} = blockchain_ledger_v1:get_routes(Ledger),
     ct:pal("Expected routes 1 ~p", [ExpRoutes1]),
     ?assertEqual(blockchain_ledger_routing_v1:addresses(ExpRoute1), Addresses1),
-
-    %% NOTE: the server will send the headers first before any data msg
-    %%       but will only send them at the point of the first data msg being sent
-    %% the headers will come in first, so assert those
-    {ok, Headers1} = sibyl_ct_utils:wait_for(
-        fun() ->
-            case grpc_client:get(Stream) of
-                empty ->
-                    false;
-                {headers, Headers} ->
-                    {true, Headers}
-            end
-        end
-    ),
-    ct:pal("Response Headers: ~p", [Headers1]),
-    #{<<":status">> := HttpStatus} = Headers1,
-    ?assertEqual(HttpStatus, <<"200">>),
 
     %% confirm the received routes matches that in the ledger
     {data, Routes1} = grpc_client:rcv(Stream, 5000),

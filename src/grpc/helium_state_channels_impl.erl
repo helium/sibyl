@@ -208,6 +208,7 @@ follow(
     {ok, SCLedgerMod, SC} = get_ledger_state_channel(SCID, SCOwner, Ledger),
     SCExpireAtHeight = SCLedgerMod:expire_at_block(SC),
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
+    lager:debug("sc id ~p will expire at height ~p.  Current height: ~p", [SCID, SCExpireAtHeight, CurHeight]),
     %% we want to know when any changes to this SC are applied to the ledger
     %% such as it being closed, so subscribe to events for this SC
     %% the events are published by the ledger commit hooks ( setup via siby_mgr )
