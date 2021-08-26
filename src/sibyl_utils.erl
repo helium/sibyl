@@ -36,8 +36,10 @@ make_sc_topic(SCID) ->
     non_neg_integer(),
     function()
 ) -> gateway_pb:gateway_resp_v1_pb().
-encode_gateway_resp_v1(#gateway_sc_is_valid_resp_v1_pb{} = Msg, Height, SigFun) ->
-    do_encode_gateway_resp_v1({is_valid_resp, Msg}, Height, SigFun);
+encode_gateway_resp_v1(#gateway_sc_is_active_resp_v1_pb{} = Msg, Height, SigFun) ->
+    do_encode_gateway_resp_v1({is_active_resp, Msg}, Height, SigFun);
+encode_gateway_resp_v1(#gateway_sc_is_overpaid_resp_v1_pb{} = Msg, Height, SigFun) ->
+    do_encode_gateway_resp_v1({is_overpaid_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_sc_close_resp_v1_pb{} = Msg, Height, SigFun) ->
     do_encode_gateway_resp_v1({close_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_sc_follow_streamed_resp_v1_pb{} = Msg, Height, SigFun) ->

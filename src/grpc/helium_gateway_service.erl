@@ -30,9 +30,10 @@
 
 %% state channel related APIs
 -export([
-    is_valid/2,
-    close/2,
-    follow/2
+    is_active_sc/2,
+    is_overpaid_sc/2,
+    close_sc/2,
+    follow_sc/2
 ]).
 
 %%%-------------------------------------------------------------------
@@ -52,14 +53,16 @@ init(RPC = routing, StreamState) ->
 %%
 %% state channel streaming APIs
 %%
-init(RPC = follow, StreamState) ->
+init(RPC = follow_sc, StreamState) ->
     helium_state_channels_impl:init(RPC, StreamState);
 %%
 %% state channel unary APIs
 %%
-init(_RPC = is_valid, StreamState) ->
+init(_RPC = is_active_sc, StreamState) ->
     StreamState;
-init(_RPC = close, StreamState) ->
+init(_RPC = is_overpaid_sc, StreamState) ->
+    StreamState;
+init(_RPC = close_sc, StreamState) ->
     StreamState.
 
 %%
@@ -68,12 +71,13 @@ init(_RPC = close, StreamState) ->
 -spec handle_info(atom(), any(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info(_RPC = routing, Msg, StreamState) ->
     helium_routing_impl:handle_info(Msg, StreamState);
-handle_info(_RPC = is_valid, Msg, StreamState) ->
+handle_info(_RPC = is_active_sc, Msg, StreamState) ->
     helium_state_channels_impl:handle_info(Msg, StreamState);
-handle_info(_RPC = close, Msg, StreamState) ->
+handle_info(_RPC = is_overpaid_sc, Msg, StreamState) ->
     helium_state_channels_impl:handle_info(Msg, StreamState);
-handle_info(_RPC = follow, Msg, StreamState) ->
-    lager:warning("got follow info msg, RPC ~p, Msg, ~p", [_RPC, Msg]),
+handle_info(_RPC = close_sc, Msg, StreamState) ->
+    helium_state_channels_impl:handle_info(Msg, StreamState);
+handle_info(_RPC = follow_sc, Msg, StreamState) ->
     helium_state_channels_impl:handle_info(Msg, StreamState);
 handle_info(_RPC, _Msg, StreamState) ->
     lager:warning("got unhandled info msg, RPC ~p, Msg, ~p", [_RPC, _Msg]),
@@ -89,20 +93,26 @@ routing(Msg, StreamState) -> helium_routing_impl:routing(Msg, StreamState).
 %%%-------------------------------------------------------------------
 %% State channel RPC implementations
 %%%-------------------------------------------------------------------
--spec is_valid(
+-spec is_active_sc(
     ctx:ctx(),
-    gateway_pb:gateway_sc_is_valid_req_v1_pb()
+    gateway_pb:gateway_sc_is_active_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
-is_valid(Ctx, Message) -> helium_state_channels_impl:is_valid(Ctx, Message).
+is_active_sc(Ctx, Message) -> helium_state_channels_impl:is_active_sc(Ctx, Message).
 
--spec close(
+-spec is_overpaid_sc(
+    ctx:ctx(),
+    gateway_pb:gateway_sc_is_overpaid_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+is_overpaid_sc(Ctx, Message) -> helium_state_channels_impl:is_overpaid_sc(Ctx, Message).
+
+-spec close_sc(
     ctx:ctx(),
     gateway_pb:gateway_sc_close_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()}.
-close(Ctx, Message) -> helium_state_channels_impl:close(Ctx, Message).
+close_sc(Ctx, Message) -> helium_state_channels_impl:close_sc(Ctx, Message).
 
--spec follow(
+-spec follow_sc(
     gateway_pb:gateway_sc_follow_req_v1(),
     grpcbox_stream:t()
 ) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
-follow(Msg, StreamState) -> helium_state_channels_impl:follow(Msg, StreamState).
+follow_sc(Msg, StreamState) -> helium_state_channels_impl:follow_sc(Msg, StreamState).

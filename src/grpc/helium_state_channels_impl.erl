@@ -43,9 +43,10 @@
 
 -export([
     init/2,
-    is_valid/2,
-    close/2,
-    follow/2,
+    is_active_sc/2,
+    is_overpaid_sc/2,
+    close_sc/2,
+    follow_sc/2,
     handle_info/2
 ]).
 
@@ -63,31 +64,39 @@ init(_RPC, StreamState) ->
     ),
     NewStreamState.
 
--spec is_valid(
+-spec is_active_sc(
     ctx:ctx(),
-    gateway_pb:gateway_sc_is_valid_req_v1_pb()
+    gateway_pb:gateway_sc_is_active_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
-is_valid(Ctx, #gateway_sc_is_valid_req_v1_pb{} = Message) ->
+is_active_sc(Ctx, #gateway_sc_is_active_req_v1_pb{} = Message) ->
     Chain = sibyl_mgr:blockchain(),
-    is_valid(Chain, Ctx, Message).
+    is_active_sc(Chain, Ctx, Message).
 
--spec close(
+-spec is_overpaid_sc(
+    ctx:ctx(),
+    gateway_pb:gateway_sc_is_overpaid_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+is_overpaid_sc(Ctx, #gateway_sc_is_overpaid_req_v1_pb{} = Message) ->
+    Chain = sibyl_mgr:blockchain(),
+    is_overpaid_sc(Chain, Ctx, Message).
+
+-spec close_sc(
     ctx:ctx(),
     gateway_pb:gateway_sc_close_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()}.
-close(Ctx, #gateway_sc_close_req_v1_pb{} = Message) ->
+close_sc(Ctx, #gateway_sc_close_req_v1_pb{} = Message) ->
     Chain = sibyl_mgr:blockchain(),
-    close(Chain, Ctx, Message).
+    close_sc(Chain, Ctx, Message).
 
--spec follow(
+-spec follow_sc(
     gateway_pb:gateway_sc_follow_req_v1(),
     grpcbox_stream:t()
 ) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
-follow(#gateway_sc_follow_req_v1_pb{sc_id = SCID, owner = SCOwner} = Msg, StreamState) ->
+follow_sc(#gateway_sc_follow_req_v1_pb{sc_id = SCID, sc_owner = SCOwner} = Msg, StreamState) ->
     Chain = sibyl_mgr:blockchain(),
     #handler_state{sc_follows = SCFollows} = grpcbox_stream:stream_handler_state(StreamState),
     Key = blockchain_ledger_v1:state_channel_key(SCID, SCOwner),
-    follow(Chain, maps:is_key(Key, SCFollows), Msg, StreamState).
+    follow_sc(Chain, maps:is_key(Key, SCFollows), Msg, StreamState).
 
 -spec handle_info(any(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info({blockchain_event, {add_block, BlockHash, _Sync, _Ledger} = _Event}, StreamState) ->
@@ -126,27 +135,25 @@ handle_info(
 %% ------------------------------------------------------------------
 %% callback breakout functions
 %% ------------------------------------------------------------------
--spec is_valid(
+-spec is_active_sc(
     undefined | blockchain:blockchain(),
     ctx:ctx(),
-    gateway_pb:gateway_sc_is_valid_req_v1_pb()
+    gateway_pb:gateway_sc_is_active_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
-is_valid(undefined = _Chain, _Ctx, #gateway_sc_is_valid_req_v1_pb{} = _Msg) ->
+is_active_sc(undefined = _Chain, _Ctx, #gateway_sc_is_active_req_v1_pb{} = _Msg) ->
     lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
-is_valid(Chain, Ctx, #gateway_sc_is_valid_req_v1_pb{sc = SC} = _Message) ->
-    lager:info("executing RPC is_valid with msg ~p", [_Message]),
-    SCID = blockchain_state_channel_v1:id(SC),
+is_active_sc(
+    Chain,
+    Ctx,
+    #gateway_sc_is_active_req_v1_pb{sc_id = SCID, sc_owner = SCOwner} = _Message
+) ->
+    lager:info("executing RPC is_active with msg ~p", [_Message]),
     {ok, CurHeight} = get_height(),
-    {IsValid, Msg} =
-        case is_valid_sc(SC, Chain) of
-            {false, Reason} -> {false, Reason};
-            true -> {true, <<>>}
-        end,
-    Response0 = #gateway_sc_is_valid_resp_v1_pb{
-        valid = IsValid,
-        reason = sibyl_utils:ensure(binary, Msg),
-        sc_id = SCID
+    Response0 = #gateway_sc_is_active_resp_v1_pb{
+        active = check_is_active_sc(SCID, SCOwner, Chain),
+        sc_id = SCID,
+        sc_owner = SCOwner
     },
     Response1 = sibyl_utils:encode_gateway_resp_v1(
         Response0,
@@ -155,15 +162,43 @@ is_valid(Chain, Ctx, #gateway_sc_is_valid_req_v1_pb{sc = SC} = _Message) ->
     ),
     {ok, Response1, Ctx}.
 
--spec close(
+-spec is_overpaid_sc(
+    undefined | blockchain:blockchain(),
+    ctx:ctx(),
+    gateway_pb:gateway_sc_is_overpaid_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+is_overpaid_sc(undefined = _Chain, _Ctx, #gateway_sc_is_overpaid_req_v1_pb{} = _Msg) ->
+    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
+    {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
+is_overpaid_sc(
+    Chain,
+    Ctx,
+    #gateway_sc_is_overpaid_req_v1_pb{sc_id = SCID, sc_owner = SCOwner, total_dcs = TotalDCs} =
+        _Message
+) ->
+    lager:info("executing RPC is_overpaid with msg ~p", [_Message]),
+    {ok, CurHeight} = get_height(),
+    Response0 = #gateway_sc_is_overpaid_resp_v1_pb{
+        overpaid = check_is_overpaid_sc(SCID, SCOwner, TotalDCs, Chain),
+        sc_id = SCID,
+        sc_owner = SCOwner
+    },
+    Response1 = sibyl_utils:encode_gateway_resp_v1(
+        Response0,
+        CurHeight,
+        sibyl_mgr:sigfun()
+    ),
+    {ok, Response1, Ctx}.
+
+-spec close_sc(
     blockchain:blockchain(),
     ctx:ctx(),
     gateway_pb:gateway_sc_close_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()}.
-close(undefined = _Chain, _Ctx, #gateway_sc_close_req_v1_pb{} = _Msg) ->
+close_sc(undefined = _Chain, _Ctx, #gateway_sc_close_req_v1_pb{} = _Msg) ->
     lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
-close(_Chain, Ctx, #gateway_sc_close_req_v1_pb{close_txn = CloseTxn} = _Message) ->
+close_sc(_Chain, Ctx, #gateway_sc_close_req_v1_pb{close_txn = CloseTxn} = _Message) ->
     lager:info("executing RPC close with msg ~p", [_Message]),
     %% TODO, maybe validate the SC exists ? but then if its a v1 it could already have been
     %% deleted from the ledger.....
@@ -179,13 +214,13 @@ close(_Chain, Ctx, #gateway_sc_close_req_v1_pb{close_txn = CloseTxn} = _Message)
     ),
     {ok, Response1, Ctx}.
 
--spec follow(
+-spec follow_sc(
     blockchain:blockchain(),
     boolean(),
     gateway_pb:gateway_follow_req_v1_pb(),
     grpcbox_stream:t()
 ) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
-follow(
+follow_sc(
     undefined = _Chain,
     _IsAlreadyFolowing,
     #gateway_sc_follow_req_v1_pb{} = _Msg,
@@ -194,10 +229,10 @@ follow(
     % if chain not up we have no way to return state channel data so just return a 14/503
     lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
-follow(
+follow_sc(
     Chain,
     false = _IsAlreadyFolowing,
-    #gateway_sc_follow_req_v1_pb{sc_id = SCID, owner = SCOwner} = _Msg,
+    #gateway_sc_follow_req_v1_pb{sc_id = SCID, sc_owner = SCOwner} = _Msg,
     StreamState
 ) ->
     %% we are not already following this SC, so lets start things rolling
@@ -208,6 +243,11 @@ follow(
     {ok, SCLedgerMod, SC} = get_ledger_state_channel(SCID, SCOwner, Ledger),
     SCExpireAtHeight = SCLedgerMod:expire_at_block(SC),
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
+    lager:debug("sc id ~p will expire at height ~p.  Current height: ~p", [
+        SCID,
+        SCExpireAtHeight,
+        CurHeight
+    ]),
     %% we want to know when any changes to this SC are applied to the ledger
     %% such as it being closed, so subscribe to events for this SC
     %% the events are published by the ledger commit hooks ( setup via siby_mgr )
@@ -230,7 +270,7 @@ follow(
         HandlerState#handler_state{
             sc_follows = maps:put(
                 LedgerSCID,
-                {SCLedgerMod, SCID, SCExpireAtHeight, undefined, CurHeight},
+                {SCLedgerMod, SCID, SCOwner, SCExpireAtHeight, undefined, CurHeight},
                 SCFollows
             )
         }
@@ -240,13 +280,13 @@ follow(
     %% for example if they started following after it closed
     NewStreamState1 = process_sc_block_events(
         LedgerSCID,
-        {SCLedgerMod, SCID, SCExpireAtHeight, undefined, CurHeight},
+        {SCLedgerMod, SCID, SCOwner, SCExpireAtHeight, undefined, CurHeight},
         CurHeight,
         SCGrace,
         NewStreamState0
     ),
     {ok, NewStreamState1};
-follow(_Chain, true = _IsAlreadyFolowing, #gateway_sc_follow_req_v1_pb{} = _Msg, StreamState) ->
+follow_sc(_Chain, true = _IsAlreadyFolowing, #gateway_sc_follow_req_v1_pb{} = _Msg, StreamState) ->
     %% we are already following this SC - ignore
     lager:info("ignoring dup follow. Msg ~p", [_Msg]),
     {ok, StreamState}.
@@ -278,10 +318,11 @@ handle_event(
     %% use the ledger key to get the standalone SC ID from our follow list
     %% and then determine if we need to send an updated msg to the client
     case maps:get(LedgerSCID, SCFollows, not_found) of
-        {SCMod, SCID, SCExpireAtHeight, SCLastState, SCLastHeight} ->
+        {SCMod, SCID, SCOwner, SCExpireAtHeight, SCLastState, SCLastHeight} ->
             {WasSent, NewStreamState, NewClosesSent} = maybe_send_follow_msg(
                 lists:member(SCID, SCClosesSent),
                 SCID,
+                SCOwner,
                 {?SC_CLOSED, SCClosesSent},
                 CurHeight,
                 SCLastState,
@@ -298,7 +339,7 @@ handle_event(
                 HandlerState#handler_state{
                     sc_follows = maps:put(
                         LedgerSCID,
-                        {SCMod, SCID, SCExpireAtHeight, UpdatedSCState, CurHeight},
+                        {SCMod, SCID, SCOwner, SCExpireAtHeight, UpdatedSCState, CurHeight},
                         SCFollows
                     ),
                     sc_closes_sent = NewClosesSent
@@ -324,48 +365,57 @@ handle_event(
             {v1, _SC} ->
                 StreamState;
             {v2, SC} ->
-                LedgerCloseState = blockchain_ledger_state_channel_v2:close_state(SC),
-                #handler_state{sc_closes_sent = SCClosesSent, sc_follows = SCFollows} =
-                    HandlerState = grpcbox_stream:stream_handler_state(
-                        StreamState
-                    ),
-                %% use the ledger key to get the standalone SC ID from our follow list
-                case maps:get(LedgerSCID, SCFollows, not_found) of
-                    {SCMod, SCID, SCExpireAtHeight, SCLastState, SCLastBlockTime} ->
-                        {ok, CurHeight} = get_height(),
-                        lager:info("got PUT for V2 SC ~p with close state ~p at height ~p", [
-                            SCID,
-                            LedgerCloseState,
-                            CurHeight
-                        ]),
-
-                        {WasSent, NewStreamState, NewClosesSent} = maybe_send_follow_msg(
-                            lists:member(SCID, SCClosesSent),
-                            SCID,
-                            {LedgerCloseState, SCClosesSent},
-                            CurHeight,
-                            SCLastState,
-                            SCLastBlockTime,
-                            StreamState
-                        ),
-                        UpdatedSCState =
-                            case WasSent of
-                                true -> LedgerCloseState;
-                                false -> SCLastState
-                            end,
-                        grpcbox_stream:stream_handler_state(
-                            NewStreamState,
-                            HandlerState#handler_state{
-                                sc_follows = maps:put(
-                                    LedgerSCID,
-                                    {SCMod, SCID, SCExpireAtHeight, UpdatedSCState, CurHeight},
-                                    SCFollows
+                case blockchain_ledger_state_channel_v2:close_state(SC) of
+                    closed ->
+                        #handler_state{sc_closes_sent = SCClosesSent, sc_follows = SCFollows} =
+                            HandlerState = grpcbox_stream:stream_handler_state(
+                                StreamState
+                            ),
+                        %% use the ledger key to get the standalone SC ID from our follow list
+                        case maps:get(LedgerSCID, SCFollows, not_found) of
+                            {SCMod, SCID, SCOwner, SCExpireAtHeight, SCLastState, SCLastBlockTime} ->
+                                {ok, CurHeight} = get_height(),
+                                lager:info(
+                                    "got PUT for V2 SC ~p with close state ~p at height ~p",
+                                    [
+                                        SCID,
+                                        ?SC_CLOSED,
+                                        CurHeight
+                                    ]
                                 ),
-                                sc_closes_sent = NewClosesSent
-                            }
-                        );
-                    not_found ->
-                        %% if we dont have a matching entry in the follow list do nothing
+
+                                {WasSent, NewStreamState, NewClosesSent} = maybe_send_follow_msg(
+                                    lists:member(SCID, SCClosesSent),
+                                    SCID,
+                                    SCOwner,
+                                    {?SC_CLOSED, SCClosesSent},
+                                    CurHeight,
+                                    SCLastState,
+                                    SCLastBlockTime,
+                                    StreamState
+                                ),
+                                UpdatedSCState =
+                                    case WasSent of
+                                        true -> ?SC_CLOSED;
+                                        false -> SCLastState
+                                    end,
+                                grpcbox_stream:stream_handler_state(
+                                    NewStreamState,
+                                    HandlerState#handler_state{
+                                        sc_follows = maps:put(
+                                            LedgerSCID,
+                                            {SCMod, SCID, SCOwner, SCExpireAtHeight, UpdatedSCState,
+                                                CurHeight},
+                                            SCFollows
+                                        ),
+                                        sc_closes_sent = NewClosesSent
+                                    }
+                                );
+                            not_found ->
+                                %% if we dont have a matching entry in the follow list do nothing
+                                StreamState
+                        end;
+                    _ ->
                         StreamState
                 end
         end,
@@ -404,7 +454,7 @@ process_sc_block_events(BlockTime, SCGrace, StreamState) ->
 ) -> grpcbox_stream:t().
 process_sc_block_events(
     LedgerSCID,
-    {SCMod, SCID, SCExpireAtHeight, SCLastState, SCLastBlockTime},
+    {SCMod, SCID, SCOwner, SCExpireAtHeight, SCLastState, SCLastBlockTime},
     BlockTime,
     _SCGrace,
     StreamState
@@ -424,6 +474,7 @@ process_sc_block_events(
     {WasSent, NewStreamState, NewClosablesSent} = maybe_send_follow_msg(
         lists:member(SCID, SCClosablesSent),
         SCID,
+        SCOwner,
         {?SC_CLOSABLE, SCClosablesSent},
         BlockTime,
         SCLastState,
@@ -443,7 +494,7 @@ process_sc_block_events(
         HandlerState#handler_state{
             sc_follows = maps:put(
                 LedgerSCID,
-                {SCMod, SCID, SCExpireAtHeight, UpdatedSCState, BlockTime},
+                {SCMod, SCID, SCOwner, SCExpireAtHeight, UpdatedSCState, BlockTime},
                 SCFollows
             ),
             sc_closables_sent = NewClosablesSent
@@ -451,7 +502,7 @@ process_sc_block_events(
     );
 process_sc_block_events(
     LedgerSCID,
-    {SCMod, SCID, SCExpireAtHeight, SCLastState, SCLastBlockTime},
+    {SCMod, SCID, SCOwner, SCExpireAtHeight, SCLastState, SCLastBlockTime},
     BlockTime,
     SCGrace,
     StreamState
@@ -472,6 +523,7 @@ process_sc_block_events(
     {WasSent, NewStreamState, NewClosingsSent} = maybe_send_follow_msg(
         lists:member(SCID, SCClosingsSent),
         SCID,
+        SCOwner,
         {?SC_CLOSING, SCClosingsSent},
         BlockTime,
         SCLastState,
@@ -491,7 +543,7 @@ process_sc_block_events(
         HandlerState#handler_state{
             sc_follows = maps:put(
                 LedgerSCID,
-                {SCMod, SCID, SCExpireAtHeight, UpdatedSCState, BlockTime},
+                {SCMod, SCID, SCOwner, SCExpireAtHeight, UpdatedSCState, BlockTime},
                 SCFollows
             ),
             sc_closings_sent = NewClosingsSent
@@ -499,7 +551,7 @@ process_sc_block_events(
     );
 process_sc_block_events(
     _LedgerSCID,
-    {_SCMod, _SCID, _SCExpireAtHeight, _SCLastState, _SCLastBlockTime},
+    {_SCMod, _SCID, _SCOwner, _SCExpireAtHeight, _SCLastState, _SCLastBlockTime},
     _BlockTime,
     _SCGrace,
     StreamState
@@ -513,6 +565,7 @@ process_sc_block_events(
 -spec maybe_send_follow_msg(
     boolean(),
     binary(),
+    binary(),
     {sc_state(), [binary()]},
     non_neg_integer(),
     sc_state(),
@@ -522,6 +575,7 @@ process_sc_block_events(
 maybe_send_follow_msg(
     true = _SentPreviously,
     SCID,
+    SCOwner,
     {SCNewState, SendList},
     Height,
     SCOldState,
@@ -532,6 +586,7 @@ maybe_send_follow_msg(
     %% so we can resend it, for example state went from closed -> dispute -> closed
     send_follow_msg(
         SCID,
+        SCOwner,
         {SCNewState, lists:delete(SCID, SendList)},
         Height,
         SCOldState,
@@ -540,6 +595,7 @@ maybe_send_follow_msg(
 maybe_send_follow_msg(
     true = _SentPreviously,
     _SCID,
+    _SCOwner,
     {_SCNewState, SendList},
     _Height,
     _SCOldState,
@@ -551,6 +607,7 @@ maybe_send_follow_msg(
 maybe_send_follow_msg(
     false = _SentPreviously,
     SCID,
+    SCOwner,
     {SCNewState, SendList},
     Height,
     SCOldState,
@@ -558,19 +615,21 @@ maybe_send_follow_msg(
     StreamState
 ) ->
     %% client has not been sent a msg with this state, so lets send it
-    send_follow_msg(SCID, {SCNewState, SendList}, Height, SCOldState, StreamState).
+    send_follow_msg(SCID, SCOwner, {SCNewState, SendList}, Height, SCOldState, StreamState).
 
 -spec send_follow_msg(
+    binary(),
     binary(),
     {sc_state(), [binary()]},
     non_neg_integer(),
     sc_state(),
     grpcbox_stream:t()
 ) -> {boolean(), grpcbox_stream:t(), list()}.
-send_follow_msg(SCID, {SCNewState, SendList}, Height, _SCOldState, StreamState) ->
-    lager:info("sending SC event ~p for SCID ~p", [SCNewState, SCID]),
+send_follow_msg(SCID, SCOwner, {SCNewState, SendList}, Height, _SCOldState, StreamState) ->
+    lager:info("sending SC event ~p for SCID ~p and SCOwner ~p", [SCNewState, SCID, SCOwner]),
     Msg0 = #gateway_sc_follow_streamed_resp_v1_pb{
         close_state = SCNewState,
+        sc_owner = SCOwner,
         sc_id = SCID
     },
     Msg1 = sibyl_utils:encode_gateway_resp_v1(
@@ -581,39 +640,31 @@ send_follow_msg(SCID, {SCNewState, SendList}, Height, _SCOldState, StreamState) 
     NewStreamState = grpcbox_stream:send(false, Msg1, StreamState),
     {true, NewStreamState, [SCID | SendList]}.
 
--spec is_valid_sc(
-    SC :: blockchain_state_channel_v1:state_channel(),
-    Chain :: blockchain:blockchain()
-) -> true | {false, atom()}.
-is_valid_sc(SC, Chain) ->
-    %% the ability of the gateway to validate an SC is limited
-    %% as it does not have the full/current SC as seen by both the
-    %% gateway and the router.  As such the validation here is basic
-    %% and questionable in terms of its usefulness beyond is it on the ledger ????
-    %% For example cannot verify if causally correct, or if summaries
-    %% are sane or if there is an overspend
-    SCOwner = blockchain_state_channel_v1:owner(SC),
-    SCID = blockchain_state_channel_v1:id(SC),
-    %% check the SC is active
-    case is_active_sc(SCID, SCOwner, Chain) of
-        {error, Reason} = _E ->
-            {false, Reason};
-        ok ->
-            true
-    end.
-
--spec is_active_sc(
+-spec check_is_active_sc(
     SCID :: binary(),
     SCOwner :: libp2p_crypto:pubkey_bin(),
     Chain :: blockchain:blockchain()
-) -> ok | {error, no_chain} | {error, inactive_sc}.
-is_active_sc(_, _, undefined) ->
-    {error, no_chain};
-is_active_sc(SCID, SCOwner, Chain) ->
+) -> true | false.
+check_is_active_sc(SCID, SCOwner, Chain) ->
     Ledger = blockchain:ledger(Chain),
     case get_ledger_state_channel(SCID, SCOwner, Ledger) of
-        {ok, _Mod, _SC} -> ok;
-        _ -> {error, inactive_sc}
+        {ok, _Mod, _SC} -> true;
+        _ -> false
+    end.
+
+-spec check_is_overpaid_sc(
+    SCID :: binary(),
+    SCOwner :: libp2p_crypto:pubkey_bin(),
+    TotalDCs :: non_neg_integer(),
+    Chain :: blockchain:blockchain()
+) -> true | false.
+check_is_overpaid_sc(SCID, SCOwner, TotalDCs, Chain) ->
+    Ledger = blockchain:ledger(Chain),
+    case get_ledger_state_channel(SCID, SCOwner, Ledger) of
+        {ok, blockchain_ledger_state_channel_v2, SC} ->
+            blockchain_ledger_state_channel_v2:original(SC) < TotalDCs;
+        _ ->
+            false
     end.
 
 -spec get_ledger_state_channel(binary(), binary(), blockchain_ledger_v1:ledger()) ->
