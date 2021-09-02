@@ -162,11 +162,10 @@ handle_info(setup, State) ->
             erlang:send_after(2000, self(), setup),
             {noreply, State}
     end;
-handle_info({blockchain_event, {new_chain, NC}}, State = #state{commit_hook_refs = Refs}) ->
-    catch [blockchain_worker:remove_commit_hook(R) || R <- Refs],
+handle_info({blockchain_event, {new_chain, NC}}, State = #state{commit_hook_refs = _Refs}) ->
+    lager:debug("updating with new chain", []),
     ets:insert(?TID, {?CHAIN, NC}),
-    {ok, NewRefs} = add_commit_hooks(),
-    {noreply, State#state{commit_hook_refs = NewRefs}};
+    {noreply, State};
 handle_info(
     {event, EventTopic, _Payload} = _Msg,
     State
@@ -261,7 +260,7 @@ add_commit_hooks() ->
         SCUpdateIncrementalFun,
         SCUpdatesEndFun
     ),
-    lager:debug("*** added commit hooks ~p ~p", [RoutingRef, SCRef]),
+    lager:debug("added commit hooks ~p ~p", [RoutingRef, SCRef]),
     {ok, [RoutingRef, SCRef]}.
 
 -spec subscribe_to_events() -> ok.

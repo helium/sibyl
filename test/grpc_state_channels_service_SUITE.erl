@@ -16,7 +16,8 @@
 ]).
 
 -export([
-    is_valid_sc_test/1,
+    is_active_sc_test/1,
+    is_overpaid_sc_test/1,
     close_sc_test/1,
     follow_sc_test/1
 ]).
@@ -39,7 +40,8 @@
 %%--------------------------------------------------------------------
 all() ->
     [
-        is_valid_sc_test,
+        is_active_sc_test,
+        is_overpaid_sc_test,
         close_sc_test,
         follow_sc_test
     ].
@@ -58,7 +60,7 @@ init_per_testcase(TestCase, Config) ->
     Config1 = sibyl_ct_utils:init_per_testcase(TestCase, Config0),
 
     LogDir = ?config(log_dir, Config1),
-    lager:set_loglevel(lager_console_backend, debug),
+    lager:set_loglevel(lager_console_backend, info),
     lager:set_loglevel({lager_file_backend, LogDir}, debug),
 
     Nodes = ?config(nodes, Config1),
@@ -206,9 +208,9 @@ end_per_testcase(TestCase, Config) ->
 %%--------------------------------------------------------------------
 %% TEST CASES
 %%--------------------------------------------------------------------
-is_valid_sc_test(Config) ->
-    %% exercise the unary API is_valid, supply it with an active SC and it should
-    %% confirm it is valid
+is_active_sc_test(Config) ->
+    %% exercise the unary API is_active, supply it with an active SC and it should
+    %% confirm it is active
     Connection = ?config(grpc_connection, Config),
     [RouterNode, GatewayNode1 | _] = ?config(nodes, Config),
     ct:pal("RouterNode: ~p", [RouterNode]),
@@ -273,29 +275,179 @@ is_valid_sc_test(Config) ->
     %% and then use it to test the is_valid GRPC api
     [ActiveSCPB] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_scs, []),
     ct:pal("ActiveSCPB: ~p", [ActiveSCPB]),
-    ActiveSCMap = ?record_to_map(blockchain_state_channel_v1_pb, ActiveSCPB),
+    SCOwner = blockchain_state_channel_v1:owner(ActiveSCPB),
+    SCID = blockchain_state_channel_v1:id(ActiveSCPB),
 
-    %% use the grpc APIs to confirm the state channel is valid/sane
+    %% use the grpc APIs to confirm the state channel is active
     {ok, #{
-        headers := Headers,
+        headers := Headers1,
         result := #{
-            msg := {is_valid_resp, ResponseMsg},
-            height := _ResponseHeight,
-            signature := _ResponseSig
-        } = Result
+            msg := {is_active_resp, ResponseMsg1},
+            height := _ResponseHeight1,
+            signature := _ResponseSig1
+        } = Result1
     }} = grpc_client:unary(
         Connection,
-        #{sc => ActiveSCMap},
+        #{sc_id => SCID, sc_owner => SCOwner},
         'helium.gateway',
-        'is_valid',
+        'is_active_sc',
         gateway_client_pb,
         []
     ),
-    ct:pal("Response Headers: ~p", [Headers]),
-    ct:pal("Response Body: ~p", [Result]),
-    #{<<":status">> := HttpStatus} = Headers,
-    ?assertEqual(HttpStatus, <<"200">>),
-    ?assertEqual(ResponseMsg#{sc_id := ActiveSCID, valid := true, reason := <<>>}, ResponseMsg),
+    ct:pal("Response Headers: ~p", [Headers1]),
+    ct:pal("Response Body: ~p", [Result1]),
+    #{<<":status">> := HttpStatus1} = Headers1,
+    ?assertEqual(HttpStatus1, <<"200">>),
+    ?assertEqual(
+        ResponseMsg1#{sc_id := ActiveSCID, sc_owner := SCOwner, active := true},
+        ResponseMsg1
+    ),
+
+    %% use the grpc APIs to confirm a non existent state channel is not active
+    {ok, #{
+        headers := Headers2,
+        result := #{
+            msg := {is_active_resp, ResponseMsg2},
+            height := _ResponseHeight2,
+            signature := _ResponseSig2
+        } = Result2
+    }} = grpc_client:unary(
+        Connection,
+        #{sc_id => <<"bad_id">>, sc_owner => SCOwner},
+        'helium.gateway',
+        'is_active_sc',
+        gateway_client_pb,
+        []
+    ),
+    ct:pal("Response Headers: ~p", [Headers2]),
+    ct:pal("Response Body: ~p", [Result2]),
+    #{<<":status">> := HttpStatus2} = Headers2,
+    ?assertEqual(HttpStatus2, <<"200">>),
+    ?assertEqual(
+        ResponseMsg2#{sc_id := <<"bad_id">>, sc_owner := SCOwner, active := false},
+        ResponseMsg2
+    ),
+    ok.
+
+is_overpaid_sc_test(Config) ->
+    %% exercise the unary API is_overpaid, supply it with an SC details and it should
+    %% confirm if it is overpaid or not
+    Connection = ?config(grpc_connection, Config),
+    [RouterNode, GatewayNode1 | _] = ?config(nodes, Config),
+    ct:pal("RouterNode: ~p", [RouterNode]),
+    ct:pal("GatewayNode1: ~p", [GatewayNode1]),
+    ConsensusMembers = ?config(consensus_members, Config),
+
+    %% Get router chain, swarm and pubkey_bin
+    RouterChain = ct_rpc:call(RouterNode, blockchain_worker, blockchain, []),
+    RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, swarm, []),
+    RouterPubkeyBin = ct_rpc:call(RouterNode, blockchain_swarm, pubkey_bin, []),
+
+    %% setup meck txn forwarding
+    Self = self(),
+    ok = sibyl_ct_utils:setup_meck_txn_forwarding(RouterNode, Self),
+
+    %% Create OUI txn
+    SignedOUITxn = sibyl_ct_utils:create_oui_txn(1, RouterNode, [], 8),
+    ct:pal("SignedOUITxn: ~p", [SignedOUITxn]),
+
+    %% Create state channel open txn
+    ID = crypto:strong_rand_bytes(24),
+    ExpireWithin = 11,
+    Nonce = 1,
+    SignedSCOpenTxn = create_sc_open_txn(RouterNode, ID, ExpireWithin, 1, Nonce),
+    ct:pal("SignedSCOpenTxn: ~p", [SignedSCOpenTxn]),
+
+    %% Add block with oui and sc open txns
+    {ok, Block0} = sibyl_ct_utils:add_block(RouterNode, RouterChain, ConsensusMembers, [
+        SignedOUITxn,
+        SignedSCOpenTxn
+    ]),
+    ct:pal("Block0: ~p", [Block0]),
+
+    %% Get sc open block hash for verification later
+    _SCOpenBlockHash = blockchain_block:hash_block(Block0),
+
+    %% Fake gossip block
+    ok = ct_rpc:call(RouterNode, blockchain_gossip_handler, add_block, [
+        Block0,
+        RouterChain,
+        Self,
+        RouterSwarm
+    ]),
+
+    %% Wait till the block is gossiped
+    ok = sibyl_ct_utils:wait_until_local_height(2),
+
+    %% Checking that state channel got created properly
+    {true, _SC1} = check_sc_open(RouterNode, RouterChain, RouterPubkeyBin, ID),
+
+    %% Check that the nonce of the sc server is okay
+    ok = sibyl_ct_utils:wait_until(
+        fun() ->
+            {ok, 0} == ct_rpc:call(RouterNode, blockchain_state_channels_server, nonce, [ID])
+        end,
+        30,
+        timer:seconds(1)
+    ),
+
+    [ActiveSCID] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_ids, []),
+    %% pull the active SC from the router node, confirm it has same ID as one from ledger
+    %% and then use it to test the is_valid GRPC api
+    [ActiveSCPB] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_scs, []),
+    ct:pal("ActiveSCPB: ~p", [ActiveSCPB]),
+    SCOwner = blockchain_state_channel_v1:owner(ActiveSCPB),
+    SCID = blockchain_state_channel_v1:id(ActiveSCPB),
+
+    %% use the grpc APIs to confirm the state channel is overpaid
+    {ok, #{
+        headers := Headers1,
+        result := #{
+            msg := {is_overpaid_resp, ResponseMsg1},
+            height := _ResponseHeight1,
+            signature := _ResponseSig1
+        } = Result1
+    }} = grpc_client:unary(
+        Connection,
+        #{sc_id => SCID, sc_owner => SCOwner, total_dcs => 10},
+        'helium.gateway',
+        'is_overpaid_sc',
+        gateway_client_pb,
+        []
+    ),
+    ct:pal("Response1 Headers1: ~p", [Headers1]),
+    ct:pal("Response1 Body1: ~p", [Result1]),
+    #{<<":status">> := HttpStatus1} = Headers1,
+    ?assertEqual(HttpStatus1, <<"200">>),
+    ?assertEqual(
+        ResponseMsg1#{sc_id := ActiveSCID, sc_owner := SCOwner, overpaid := false},
+        ResponseMsg1
+    ),
+
+    {ok, #{
+        headers := Headers2,
+        result := #{
+            msg := {is_overpaid_resp, ResponseMsg2},
+            height := _ResponseHeight2,
+            signature := _ResponseSig2
+        } = Result2
+    }} = grpc_client:unary(
+        Connection,
+        #{sc_id => SCID, sc_owner => SCOwner, total_dcs => 30},
+        'helium.gateway',
+        'is_overpaid_sc',
+        gateway_client_pb,
+        []
+    ),
+
+    ct:pal("Response Headers2: ~p", [Headers2]),
+    ct:pal("Response Body2: ~p", [Result2]),
+    #{<<":status">> := HttpStatus2} = Headers2,
+    ?assertEqual(HttpStatus2, <<"200">>),
+    ?assertEqual(
+        ResponseMsg2#{sc_id := ActiveSCID, sc_owner := SCOwner, overpaid := true},
+        ResponseMsg2
+    ),
 
     ok.
 
@@ -395,7 +547,7 @@ close_sc_test(Config) ->
         Connection,
         #{close_txn => SignedTxnMap2},
         'helium.gateway',
-        'close',
+        'close_sc',
         gateway_client_pb,
         []
     ),
@@ -431,8 +583,8 @@ follow_sc_test(Config) ->
     RouterPubkeyBin = ct_rpc:call(RouterNode, blockchain_swarm, pubkey_bin, []),
 
     %% Get local chain, swarm and pubkey_bin
-    _LocalChain = blockchain_worker:blockchain(),
-    _LocalSwarm = blockchain_swarm:swarm(),
+    LocalChain = blockchain_worker:blockchain(),
+    LocalSwarm = blockchain_swarm:swarm(),
     _LocalPubkeyBin = blockchain_swarm:pubkey_bin(),
 
     %% Check that the meck txn forwarding works
@@ -483,10 +635,9 @@ follow_sc_test(Config) ->
     ok = sibyl_ct_utils:wait_until_height(RouterNode, 2),
     ok = sibyl_ct_utils:wait_until_local_height(2),
 
-    %% Checking that state channel got created properly
+    %% Checking that state channel 1 got created properly
     {true, SC1} = check_sc_open(RouterNode, RouterChain, RouterPubkeyBin, ID1),
-
-    %% Checking that state channel got created properly
+    %% Checking that state channel 2 got created properly
     {true, SC2} = check_sc_open(RouterNode, RouterChain, RouterPubkeyBin, ID2),
 
     %% Check that the nonce of the sc server is okay
@@ -508,7 +659,7 @@ follow_sc_test(Config) ->
     {ok, Stream} = grpc_client:new_stream(
         Connection,
         'helium.gateway',
-        follow,
+        follow_sc,
         gateway_client_pb
     ),
 
@@ -516,11 +667,11 @@ follow_sc_test(Config) ->
     ?assertEqual(ID1, ActiveSCID),
     ok = grpc_client:send(Stream, #{
         sc_id => ID1,
-        owner => blockchain_ledger_state_channel_v1:owner(SC1)
+        sc_owner => blockchain_ledger_state_channel_v2:owner(SC1)
     }),
     ok = grpc_client:send(Stream, #{
         sc_id => ID2,
-        owner => blockchain_ledger_state_channel_v1:owner(SC2)
+        sc_owner => blockchain_ledger_state_channel_v2:owner(SC2)
     }),
     ok = timer:sleep(timer:seconds(2)),
 
@@ -535,11 +686,10 @@ follow_sc_test(Config) ->
         RouterChain,
         Self
     ),
-    %% HEIGHT MARKER -> 13
     ok = sibyl_ct_utils:wait_until_height(RouterNode, 13),
     ok = sibyl_ct_utils:wait_until_local_height(13),
 
-    %% headers are always sent with the first data msg
+    %% confirm we got our grpc headers
     {headers, Headers0} = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Headers0: ~p", [Headers0]),
     #{<<":status">> := Headers0HttpStatus} = Headers0,
@@ -583,25 +733,26 @@ follow_sc_test(Config) ->
     receive
         {txn, Txn1} ->
             ?assertEqual(blockchain_txn_state_channel_close_v1, blockchain_txn:type(Txn1)),
-            {ok, B1} = ct_rpc:call(RouterNode, sibyl_ct_utils, create_block, [
+            {ok, B1} = sibyl_ct_utils:create_block(
                 ConsensusMembers,
                 [Txn1]
-            ]),
-            _ = ct_rpc:call(RouterNode, blockchain_gossip_handler, add_block, [
+            ),
+            _ = blockchain_gossip_handler:add_block(
                 B1,
-                RouterChain,
+                LocalChain,
                 Self,
-                RouterSwarm
-            ])
+                LocalSwarm
+            )
     after 10000 -> ct:fail("txn timeout")
     end,
+    ok = sibyl_ct_utils:wait_until_local_height(15),
+
     %% we expect the closed at block height 15, push 1 beyond and confirm the height in the payload is as expected
-    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(
+    ok = sibyl_ct_utils:local_add_and_gossip_fake_blocks(
         1,
         ConsensusMembers,
-        RouterNode,
-        RouterSwarm,
-        RouterChain,
+        LocalSwarm,
+        LocalChain,
         Self
     ),
     ok = sibyl_ct_utils:wait_until_height(RouterNode, 16),
@@ -623,16 +774,15 @@ follow_sc_test(Config) ->
     ?assertNotEqual(ActiveSCID, ActiveSCID2),
 
     %% Adding fake blocks to get state channel 2 to expire
-    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(
-        3,
+    ok = sibyl_ct_utils:local_add_and_gossip_fake_blocks(
+        8,
         ConsensusMembers,
-        RouterNode,
-        RouterSwarm,
-        RouterChain,
+        LocalSwarm,
+        LocalChain,
         Self
     ),
-    ok = sibyl_ct_utils:wait_until_height(RouterNode, 19),
-    ok = sibyl_ct_utils:wait_until_local_height(19),
+    ok = sibyl_ct_utils:wait_until_height(RouterNode, 24),
+    ok = sibyl_ct_utils:wait_until_local_height(24),
 
     %%
     %% we should receive 3 stream msgs for SC2, closable, closing and closed
@@ -645,17 +795,15 @@ follow_sc_test(Config) ->
     ?assertEqual(ActiveSCID2, Data3SCID2),
     ?assertEqual(Data3CloseState, close_state_closable),
 
-    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(
+    ok = sibyl_ct_utils:local_add_and_gossip_fake_blocks(
         1,
         ConsensusMembers,
-        RouterNode,
-        RouterSwarm,
-        RouterChain,
+        LocalSwarm,
+        LocalChain,
         Self
     ),
-    %% HEIGHT MARKER -> 20
-    ok = sibyl_ct_utils:wait_until_height(RouterNode, 20),
-    ok = sibyl_ct_utils:wait_until_local_height(20),
+    ok = sibyl_ct_utils:wait_until_height(RouterNode, 25),
+    ok = sibyl_ct_utils:wait_until_local_height(25),
 
     {data, #{height := 20, msg := {follow_streamed_resp, Data4FollowMsg}}} =
         Data4 = grpc_client:rcv(Stream, 5000),
@@ -670,31 +818,30 @@ follow_sc_test(Config) ->
     receive
         {txn, Txn2} ->
             ?assertEqual(blockchain_txn_state_channel_close_v1, blockchain_txn:type(Txn2)),
-            {ok, B2} = ct_rpc:call(RouterNode, sibyl_ct_utils, create_block, [
+            {ok, B2} = sibyl_ct_utils:create_block(
                 ConsensusMembers,
                 [Txn2]
-            ]),
-            _ = ct_rpc:call(RouterNode, blockchain_gossip_handler, add_block, [
+            ),
+            _ = blockchain_gossip_handler:add_block(
                 B2,
-                RouterChain,
+                LocalChain,
                 Self,
-                RouterSwarm
-            ])
+                LocalSwarm
+            )
     after 10000 -> ct:fail("txn timeout")
     end,
     %% we expect the closed at block height 21, push 1 beyond and confirm the height in the payload is as expected
-    ok = sibyl_ct_utils:add_and_gossip_fake_blocks(
+    ok = sibyl_ct_utils:local_add_and_gossip_fake_blocks(
         1,
         ConsensusMembers,
-        RouterNode,
-        RouterSwarm,
-        RouterChain,
+        LocalSwarm,
+        LocalChain,
         Self
     ),
-    ok = sibyl_ct_utils:wait_until_height(RouterNode, 22),
-    ok = sibyl_ct_utils:wait_until_local_height(22),
+    ok = sibyl_ct_utils:wait_until_height(RouterNode, 27),
+    ok = sibyl_ct_utils:wait_until_local_height(27),
 
-    {data, #{height := 21, msg := {follow_streamed_resp, Data5FollowMsg}}} =
+    {data, #{height := 26, msg := {follow_streamed_resp, Data5FollowMsg}}} =
         Data5 = grpc_client:rcv(Stream, 8000),
     ct:pal("Response Data5: ~p", [Data5]),
     #{sc_id := Data5SCID2, close_state := Data5CloseState} = Data5FollowMsg,
@@ -727,8 +874,8 @@ check_sc_open(RouterNode, RouterChain, RouterPubkeyBin, ID) ->
         RouterPubkeyBin,
         RouterLedger
     ]),
-    C1 = ID == blockchain_ledger_state_channel_v1:id(SC),
-    C2 = RouterPubkeyBin == blockchain_ledger_state_channel_v1:owner(SC),
+    C1 = ID == blockchain_ledger_state_channel_v2:id(SC),
+    C2 = RouterPubkeyBin == blockchain_ledger_state_channel_v2:owner(SC),
     {C1 andalso C2, SC}.
 
 check_all_closed([]) ->
