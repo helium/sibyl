@@ -31,8 +31,7 @@
 -export([
     is_active_sc/2,
     is_overpaid_sc/2,
-    close_sc/2,
-    stream/2
+    close_sc/2
 ]).
 
 %% POC APIs
@@ -43,64 +42,30 @@
     poc_key_to_public_uri/2
 ]).
 
+%% Stream API
+-export([
+    stream/2
+]).
+
 %%%-------------------------------------------------------------------
 %% common API implementations
 %%%-------------------------------------------------------------------
 
 %%
-%% unary APIs init - called from grpcbox
+%% RPC init - called from grpcbox
 %%
-init(_RPC = is_active_sc, StreamState) ->
-    StreamState;
-init(_RPC = is_overpaid_sc, StreamState) ->
-    StreamState;
-init(_RPC = close_sc, StreamState) ->
+init(_RPC, StreamState) ->
     StreamState.
 
 %%
 %% Any API can potentially handle info msgs, but really should only be used by streaming APIs
+%% each handler initializes a map as state.  the map will always have a mod field which will
+%% be the module of the handler, use this to route info messages.
 %%
-
-%% non event related info msgs should be tagged with an identifier via which
-%% we can identify the relevant handler
 -spec handle_info(atom(), any(), grpcbox_stream:t()) -> grpcbox_stream:t().
-handle_info(_RPC = routing, {routing, Msg}, StreamState) ->
-    helium_routing_impl:handle_info(Msg, StreamState);
-handle_info(_RPC = is_active_sc, Msg, StreamState) ->
-    helium_state_channels_impl:handle_info(Msg, StreamState);
-handle_info(_RPC = is_overpaid_sc, Msg, StreamState) ->
-    helium_state_channels_impl:handle_info(Msg, StreamState);
-handle_info(_RPC = close_sc, Msg, StreamState) ->
-    helium_state_channels_impl:handle_info(Msg, StreamState);
-handle_info(_RPC = stream, {state_channel, Msg} = Payload, StreamState) ->
-    lager:debug("got info msg, RPC ~p, Msg, ~p", [_RPC, Payload]),
-    helium_state_channels_impl:handle_info(Msg, StreamState);
-handle_info(_RPC = stream, {poc, _Msg} = Payload, StreamState) ->
-    lager:info("got info msg, RPC ~p, Msg, ~p", [_RPC, Payload]),
-    helium_poc_impl:handle_info(Payload, StreamState);
-%% route event msg to relevant handler based on event type
-handle_info(_RPC = stream, {event, ?EVENT_ROUTING_UPDATE, _Payload} = Event, StreamState) ->
-    lager:debug("got event msg, RPC ~p, Msg, ~p", [_RPC, Event]),
-    helium_routing_impl:handle_info(Event, StreamState);
-handle_info(_RPC = stream, {event, ?EVENT_ROUTING_UPDATES_END, _Payload} = Event, StreamState) ->
-    lager:debug("got event msg, RPC ~p, Msg, ~p", [_RPC, Event]),
-    helium_routing_impl:handle_info(Event, StreamState);
-handle_info(_RPC = stream, {event, ?EVENT_STATE_CHANNEL_UPDATE, _Payload} = Event, StreamState) ->
-    lager:debug("got event msg, RPC ~p, Msg, ~p", [_RPC, Event]),
-    helium_state_channels_impl:handle_info(Event, StreamState);
-handle_info(
-    _RPC = stream,
-    {event, ?EVENT_STATE_CHANNEL_UPDATES_END, _Payload} = Event,
-    StreamState
-) ->
-    lager:debug("got event msg, RPC ~p, Msg, ~p", [_RPC, Event]),
-    helium_state_channels_impl:handle_info(Event, StreamState);
-handle_info(_RPC = stream, {event, ?EVENT_POC_NOTIFICATION, _Payload} = Event, StreamState) ->
-    lager:debug("got event msg, RPC ~p, Msg, ~p", [_RPC, Event]),
-    helium_poc_impl:handle_info(Event, StreamState);
-handle_info(_RPC, _Msg, StreamState) ->
-    lager:warning("got unhandled info msg, RPC ~p, Msg, ~p", [_RPC, _Msg]),
-    StreamState.
+handle_info(_RPC, Msg, StreamState) ->
+    #{mod := MODULE} = _HandlerState = grpcbox_stream:stream_handler_state(StreamState),
+    MODULE:handle_info(Msg, StreamState).
 
 %%%-------------------------------------------------------------------
 %% Routing RPC implementations
@@ -168,7 +133,8 @@ poc_key_to_public_uri(Ctx, Message) ->
     grpcbox_stream:t()
 ) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 stream({gateway_stream_req_v1_pb, {follow_req, Msg}}, StreamState) ->
-    helium_state_channels_impl:follow(Msg, StreamState);
+    lager:info("*** point 1", []),
+    helium_state_channels_impl:follow_sc(Msg, StreamState);
 stream({gateway_stream_req_v1_pb, {routing_req, Msg}}, StreamState) ->
     helium_routing_impl:routing(Msg, StreamState);
 stream({gateway_stream_req_v1_pb, {poc_req, Msg}}, StreamState) ->

@@ -3,22 +3,36 @@
 -include("../../include/sibyl.hrl").
 -include("autogen/server/gateway_pb.hrl").
 
--record(handler_state, {
-    initialized = false :: boolean()
-}).
+-type handler_state() :: #{
+    mod => atom(),
+    initialized => boolean()
+}.
+-export_type([handler_state/0]).
 
 -export([
+    init/2,
     handle_info/2,
     routing/2
 ]).
+
+-spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
+init(_RPC, StreamState) ->
+    lager:info("handler init, stream state ~p", [StreamState]),
+    %% subscribe to block events so we can get blocktime
+    ok = blockchain_event:add_handler(self()),
+    NewStreamState = grpcbox_stream:stream_handler_state(
+        StreamState,
+        #{initialized => false, mod => ?MODULE}
+    ),
+    NewStreamState.
 
 -spec routing(gateway_pb:gateway_routing_req_v1_pb(), grpcbox_stream:t()) ->
     {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 routing(#gateway_routing_req_v1_pb{height = ClientHeight} = Msg, StreamState) ->
     lager:debug("RPC routing called with height ~p", [ClientHeight]),
     HandlerState = grpcbox_stream:stream_handler_state(StreamState),
-    StreamState0 = maybe_init_stream_state(HandlerState, StreamState),
-    #handler_state{initialized = Initialized} = grpcbox_stream:stream_handler_state(StreamState0),
+    StreamState0 = maybe_init_stream_state(routing, HandlerState, StreamState),
+    #{initialized := Initialized} = grpcbox_stream:stream_handler_state(StreamState0),
     routing(Initialized, sibyl_mgr:blockchain(), Msg, StreamState0).
 
 -spec routing(
@@ -41,11 +55,12 @@ routing(
     %% we will have some setup to do including subscribing to our required events
     lager:debug("handling first msg from client ~p", [_Msg]),
     ok = sibyl_bus:sub(?EVENT_ROUTING_UPDATES_END, self()),
+    HandlerState = grpcbox_stream:stream_handler_state(StreamState),
     NewStreamState = maybe_send_inital_all_routes_msg(ClientHeight, StreamState),
     NewStreamState0 = grpcbox_stream:stream_handler_state(
         NewStreamState,
-        #handler_state{
-            initialized = true
+        HandlerState#{
+            initialized => true
         }
     ),
     {ok, NewStreamState0};
@@ -166,16 +181,11 @@ is_data_modified(ClientLastHeight, LastModifiedHeight) when
 is_data_modified(_ClientLastHeight, _LastModifiedHeight) ->
     true.
 
--spec maybe_init_stream_state(undefined | #handler_state{}, grpcbox_stream:t()) ->
+-spec maybe_init_stream_state(atom(), undefined | handler_state(), grpcbox_stream:t()) ->
     grpcbox_stream:t().
-maybe_init_stream_state(undefined, StreamState) ->
+maybe_init_stream_state(RPC, undefined, StreamState) ->
     lager:debug("handler init, stream state ~p", [StreamState]),
-    NewStreamState = grpcbox_stream:stream_handler_state(
-        StreamState,
-        #handler_state{
-            initialized = false
-        }
-    ),
+    NewStreamState = init(RPC, StreamState),
     NewStreamState;
-maybe_init_stream_state(_HandlerState, StreamState) ->
+maybe_init_stream_state(_RPC, _HandlerState, StreamState) ->
     StreamState.

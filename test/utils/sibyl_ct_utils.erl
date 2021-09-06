@@ -846,7 +846,7 @@ local_add_and_gossip_fake_blocks(NumFakeBlocks, ConsensusMembers, Swarm, Chain, 
 %% ------------------------------------------------------------------
 %% Internal functions
 %% ------------------------------------------------------------------
-make_block(Blockchain, ConsensusMembers, STxs, Override) ->
+make_block(Blockchain, ConsensusMembers, STxs, _Override) ->
     {ok, HeadBlock} = blockchain:head_block(Blockchain),
     {ok, PrevHash} = blockchain:head_hash(Blockchain),
     Height = blockchain_block:height(HeadBlock) + 1,
@@ -862,9 +862,10 @@ make_block(Blockchain, ConsensusMembers, STxs, Override) ->
         election_epoch => 1,
         epoch_start => 0,
         seen_votes => [],
-        bba_completion => <<>>
+        bba_completion => <<>>,
+        poc_keys => []
     },
-    Block0 = blockchain_block_v1:new(maps:merge(Default, Override)),
+    Block0 = blockchain_block_v1:new(Default),
     BinBlock = blockchain_block:serialize(Block0),
     Signatures = signatures(ConsensusMembers, BinBlock),
     Block1 = blockchain_block:set_signatures(Block0, Signatures),

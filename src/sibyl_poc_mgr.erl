@@ -164,7 +164,7 @@ run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, Vars) ->
                         fun(GW) ->
                             Topic = sibyl_utils:make_poc_topic(GW),
                             lager:info("*** sending poc notification to gateway ~p", [GW]),
-                            sibyl_bus:pub(Topic, {poc, Notification})
+                            sibyl_bus:pub(Topic, {poc_notify, Notification})
                         end,
                         ZoneGWs
                     )

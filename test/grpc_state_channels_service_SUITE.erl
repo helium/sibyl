@@ -540,7 +540,7 @@ close_sc_test(Config) ->
     {ok, #{
         headers := Headers,
         result := #{
-            msg := {sc_close_resp, ResponseMsg},
+            msg := {close_resp, ResponseMsg},
             height := _ResponseHeight,
             signature := _ResponseSig
         } = Result

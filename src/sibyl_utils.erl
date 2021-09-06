@@ -46,9 +46,9 @@ encode_gateway_resp_v1(#gateway_sc_is_active_resp_v1_pb{} = Msg, Height, SigFun)
 encode_gateway_resp_v1(#gateway_sc_is_overpaid_resp_v1_pb{} = Msg, Height, SigFun) ->
     do_encode_gateway_resp_v1({is_overpaid_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_sc_close_resp_v1_pb{} = Msg, Height, SigFun) ->
-    do_encode_gateway_resp_v1({sc_close_resp, Msg}, Height, SigFun);
+    do_encode_gateway_resp_v1({close_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_sc_follow_streamed_resp_v1_pb{} = Msg, Height, SigFun) ->
-    do_encode_gateway_resp_v1({sc_follow_streamed_resp, Msg}, Height, SigFun);
+    do_encode_gateway_resp_v1({follow_streamed_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_routing_streamed_resp_v1_pb{} = Msg, Height, SigFun) ->
     do_encode_gateway_resp_v1({routing_streamed_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_poc_challenge_notification_resp_v1_pb{} = Msg, Height, SigFun) ->

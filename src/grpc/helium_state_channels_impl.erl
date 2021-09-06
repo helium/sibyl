@@ -28,18 +28,30 @@
         SCLastBlockTime :: non_neg_integer()
     }.
 
--record(handler_state, {
-    %% tracks which SC we are following
-    sc_follows = #{} :: #{binary() => follow()},
-    %% tracks which SCs we have send a closed msg for
-    sc_closes_sent = [] :: list(),
-    %% tracks which SCs we have send a closing msg for
-    sc_closings_sent = [] :: list(),
-    %% tracks which SCs we have send a closable msg for
-    sc_closables_sent = [] :: list(),
-    %% tracks which SCs we have send a dispute msg for
-    sc_disputes_sent = [] :: list()
-}).
+-type handler_state() :: #{
+    mod => atom(),
+    sc_follows => map(),
+    sc_closes_sent => [any()],
+    sc_closings_sent => [any()],
+    sc_closables_sent => [any()],
+    sc_disputes_sent => [any()]
+}.
+-export_type([handler_state/0]).
+
+%%-record(handler_state, {
+%%    %% module of the handler
+%%    mod = undefined :: atom(),
+%%    %% tracks which SC we are following
+%%    sc_follows = #{} :: #{binary() => follow()},
+%%    %% tracks which SCs we have send a closed msg for
+%%    sc_closes_sent = [] :: list(),
+%%    %% tracks which SCs we have send a closing msg for
+%%    sc_closings_sent = [] :: list(),
+%%    %% tracks which SCs we have send a closable msg for
+%%    sc_closables_sent = [] :: list(),
+%%    %% tracks which SCs we have send a dispute msg for
+%%    sc_disputes_sent = [] :: list()
+%%}).
 
 -export([
     init/2,
@@ -60,7 +72,14 @@ init(_RPC, StreamState) ->
     ok = blockchain_event:add_handler(self()),
     NewStreamState = grpcbox_stream:stream_handler_state(
         StreamState,
-        #handler_state{}
+        #{
+            mod => ?MODULE,
+            sc_follows => #{},
+            sc_closes_sent => [],
+            sc_closings_sent => [],
+            sc_closables_sent => [],
+            sc_disputes_sent => []
+        }
     ),
     NewStreamState.
 
@@ -94,11 +113,16 @@ close_sc(Ctx, #gateway_sc_close_req_v1_pb{} = Message) ->
 ) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 follow_sc(#gateway_sc_follow_req_v1_pb{sc_id = SCID, sc_owner = SCOwner} = Msg, StreamState) ->
     Chain = sibyl_mgr:blockchain(),
-    #handler_state{sc_follows = SCFollows} =
-        HandlerState = grpcbox_stream:stream_handler_state(StreamState),
-    StreamState0 = maybe_init_stream_state(HandlerState, StreamState),
+    lager:info("*** point 2", []),
+    CurHandlerState = grpcbox_stream:stream_handler_state(StreamState),
+    lager:info("*** point 3", []),
+    StreamState0 = maybe_init_stream_state(follow_sc, CurHandlerState, StreamState),
+    lager:info("*** point 4", []),
+    #{sc_follows := SCFollows} = grpcbox_stream:stream_handler_state(StreamState0),
+    lager:info("*** point 5", []),
     Key = blockchain_ledger_v1:state_channel_key(SCID, SCOwner),
-    follow_sc(Chain, maps:is_key(Key, SCFollows), Msg, StreamState).
+    lager:info("*** point 6", []),
+    follow_sc(Chain, maps:is_key(Key, SCFollows), Msg, StreamState0).
 
 -spec handle_info(any(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info({blockchain_event, {add_block, BlockHash, _Sync, _Ledger} = _Event}, StreamState) ->
@@ -263,14 +287,14 @@ follow_sc(
     lager:info("subscribing to SC events for key ~p and topic ~p", [LedgerSCID, SCTopic]),
     ok = sibyl_bus:sub(SCTopic, self()),
     %% add this SC to our follow list
-    #handler_state{sc_follows = SCFollows} =
+    #{sc_follows := SCFollows} =
         HandlerState = grpcbox_stream:stream_handler_state(
             StreamState
         ),
     NewStreamState0 = grpcbox_stream:stream_handler_state(
         StreamState,
-        HandlerState#handler_state{
-            sc_follows = maps:put(
+        HandlerState#{
+            sc_follows => maps:put(
                 LedgerSCID,
                 {SCLedgerMod, SCID, SCOwner, SCExpireAtHeight, undefined, CurHeight},
                 SCFollows
@@ -313,7 +337,7 @@ handle_event(
         LedgerSCID,
         CurHeight
     ]),
-    #handler_state{sc_closes_sent = SCClosesSent, sc_follows = SCFollows} =
+    #{sc_closes_sent := SCClosesSent, sc_follows := SCFollows} =
         HandlerState = grpcbox_stream:stream_handler_state(
             StreamState
         ),
@@ -338,13 +362,13 @@ handle_event(
                 end,
             grpcbox_stream:stream_handler_state(
                 NewStreamState,
-                HandlerState#handler_state{
-                    sc_follows = maps:put(
+                HandlerState#{
+                    sc_follows => maps:put(
                         LedgerSCID,
                         {SCMod, SCID, SCOwner, SCExpireAtHeight, UpdatedSCState, CurHeight},
                         SCFollows
                     ),
-                    sc_closes_sent = NewClosesSent
+                    sc_closes_sent => NewClosesSent
                 }
             );
         not_found ->
@@ -369,7 +393,7 @@ handle_event(
             {v2, SC} ->
                 case blockchain_ledger_state_channel_v2:close_state(SC) of
                     closed ->
-                        #handler_state{sc_closes_sent = SCClosesSent, sc_follows = SCFollows} =
+                        #{sc_closes_sent := SCClosesSent, sc_follows := SCFollows} =
                             HandlerState = grpcbox_stream:stream_handler_state(
                                 StreamState
                             ),
@@ -403,14 +427,14 @@ handle_event(
                                     end,
                                 grpcbox_stream:stream_handler_state(
                                     NewStreamState,
-                                    HandlerState#handler_state{
-                                        sc_follows = maps:put(
+                                    HandlerState#{
+                                        sc_follows => maps:put(
                                             LedgerSCID,
                                             {SCMod, SCID, SCOwner, SCExpireAtHeight, UpdatedSCState,
                                                 CurHeight},
                                             SCFollows
                                         ),
-                                        sc_closes_sent = NewClosesSent
+                                        sc_closes_sent => NewClosesSent
                                     }
                                 );
                             not_found ->
@@ -436,7 +460,7 @@ handle_event(
 process_sc_block_events(BlockTime, SCGrace, StreamState) ->
     %% for each SC we are following, check if we are now in a closable or closing state
     %% ( we will derive close and dispute states from the ledger update events )
-    #handler_state{sc_follows = SCFollows} = grpcbox_stream:stream_handler_state(
+    #{sc_follows := SCFollows} = grpcbox_stream:stream_handler_state(
         StreamState
     ),
     maps:fold(
@@ -469,7 +493,7 @@ process_sc_block_events(
     %% unless we previously entered the closed or dispute state
     lager:info("process_sc_block_events: block time same as SCExpireHeight", []),
     %% send closeable event if not previously sent
-    #handler_state{sc_closables_sent = SCClosablesSent} =
+    #{sc_closables_sent := SCClosablesSent} =
         HandlerState = grpcbox_stream:stream_handler_state(
             StreamState
         ),
@@ -483,7 +507,7 @@ process_sc_block_events(
         SCLastBlockTime,
         StreamState
     ),
-    #handler_state{sc_follows = SCFollows} = grpcbox_stream:stream_handler_state(
+    #{sc_follows := SCFollows} = grpcbox_stream:stream_handler_state(
         StreamState
     ),
     UpdatedSCState =
@@ -493,13 +517,13 @@ process_sc_block_events(
         end,
     grpcbox_stream:stream_handler_state(
         NewStreamState,
-        HandlerState#handler_state{
-            sc_follows = maps:put(
+        HandlerState#{
+            sc_follows => maps:put(
                 LedgerSCID,
                 {SCMod, SCID, SCOwner, SCExpireAtHeight, UpdatedSCState, BlockTime},
                 SCFollows
             ),
-            sc_closables_sent = NewClosablesSent
+            sc_closables_sent => NewClosablesSent
         }
     );
 process_sc_block_events(
@@ -518,7 +542,7 @@ process_sc_block_events(
     %% unless we previously entered the closed or dispute state
     lager:info("process_sc_block_events: block time within SC expire-at grace time", []),
     %% send closing event if not previously sent
-    #handler_state{sc_closings_sent = SCClosingsSent} =
+    #{sc_closings_sent := SCClosingsSent} =
         HandlerState = grpcbox_stream:stream_handler_state(
             StreamState
         ),
@@ -537,18 +561,18 @@ process_sc_block_events(
             true -> ?SC_CLOSING;
             _ -> SCLastState
         end,
-    #handler_state{sc_follows = SCFollows} = grpcbox_stream:stream_handler_state(
+    #{sc_follows := SCFollows} = grpcbox_stream:stream_handler_state(
         StreamState
     ),
     grpcbox_stream:stream_handler_state(
         NewStreamState,
-        HandlerState#handler_state{
-            sc_follows = maps:put(
+        HandlerState#{
+            sc_follows => maps:put(
                 LedgerSCID,
                 {SCMod, SCID, SCOwner, SCExpireAtHeight, UpdatedSCState, BlockTime},
                 SCFollows
             ),
-            sc_closings_sent = NewClosingsSent
+            sc_closings_sent => NewClosingsSent
         }
     );
 process_sc_block_events(
@@ -698,14 +722,11 @@ deserialize_sc(SC = <<1, _/binary>>) ->
 deserialize_sc(SC = <<2, _/binary>>) ->
     {v2, blockchain_ledger_state_channel_v2:deserialize(SC)}.
 
--spec maybe_init_stream_state(undefined | #handler_state{}, grpcbox_stream:t()) ->
+-spec maybe_init_stream_state(atom(), undefined | handler_state(), grpcbox_stream:t()) ->
     grpcbox_stream:t().
-maybe_init_stream_state(undefined, StreamState) ->
+maybe_init_stream_state(RPC, undefined, StreamState) ->
     lager:debug("handler init, stream state ~p", [StreamState]),
-    NewStreamState = grpcbox_stream:stream_handler_state(
-        StreamState,
-        #handler_state{}
-    ),
+    NewStreamState = init(RPC, StreamState),
     NewStreamState;
-maybe_init_stream_state(_HandlerState, StreamState) ->
+maybe_init_stream_state(_RPC, _HandlerState, StreamState) ->
     StreamState.
