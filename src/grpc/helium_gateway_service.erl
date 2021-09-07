@@ -64,8 +64,8 @@ init(_RPC, StreamState) ->
 %%
 -spec handle_info(atom(), any(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info(_RPC, Msg, StreamState) ->
-    #{mod := MODULE} = _HandlerState = grpcbox_stream:stream_handler_state(StreamState),
-    MODULE:handle_info(Msg, StreamState).
+    #{mod := Module} = _HandlerState = grpcbox_stream:stream_handler_state(StreamState),
+    Module:handle_info(Msg, StreamState).
 
 %%%-------------------------------------------------------------------
 %% Routing RPC implementations

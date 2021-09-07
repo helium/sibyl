@@ -388,9 +388,10 @@ pocs(
             Topic = sibyl_utils:make_poc_topic(Addr),
             lager:info("subscribing to poc events for gw ~p", [Addr]),
             ok = sibyl_bus:sub(Topic, self()),
+            HandlerState = grpcbox_stream:stream_handler_state(StreamState),
             NewStreamState = grpcbox_stream:stream_handler_state(
                 StreamState,
-                #{
+                HandlerState#{
                     streaming_initialized => true
                 }
             ),
