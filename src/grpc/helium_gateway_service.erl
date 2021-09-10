@@ -31,7 +31,6 @@
 %% state channel related APIs
 -export([
     is_active_sc/2,
-    is_overpaid_sc/2,
     close_sc/2,
     follow_sc/2
 ]).
@@ -60,8 +59,6 @@ init(RPC = follow_sc, StreamState) ->
 %%
 init(_RPC = is_active_sc, StreamState) ->
     StreamState;
-init(_RPC = is_overpaid_sc, StreamState) ->
-    StreamState;
 init(_RPC = close_sc, StreamState) ->
     StreamState.
 
@@ -72,8 +69,6 @@ init(_RPC = close_sc, StreamState) ->
 handle_info(_RPC = routing, Msg, StreamState) ->
     helium_routing_impl:handle_info(Msg, StreamState);
 handle_info(_RPC = is_active_sc, Msg, StreamState) ->
-    helium_state_channels_impl:handle_info(Msg, StreamState);
-handle_info(_RPC = is_overpaid_sc, Msg, StreamState) ->
     helium_state_channels_impl:handle_info(Msg, StreamState);
 handle_info(_RPC = close_sc, Msg, StreamState) ->
     helium_state_channels_impl:handle_info(Msg, StreamState);
@@ -98,12 +93,6 @@ routing(Msg, StreamState) -> helium_routing_impl:routing(Msg, StreamState).
     gateway_pb:gateway_sc_is_active_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
 is_active_sc(Ctx, Message) -> helium_state_channels_impl:is_active_sc(Ctx, Message).
-
--spec is_overpaid_sc(
-    ctx:ctx(),
-    gateway_pb:gateway_sc_is_overpaid_req_v1_pb()
-) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
-is_overpaid_sc(Ctx, Message) -> helium_state_channels_impl:is_overpaid_sc(Ctx, Message).
 
 -spec close_sc(
     ctx:ctx(),

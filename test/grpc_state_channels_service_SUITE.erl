@@ -17,7 +17,6 @@
 
 -export([
     is_active_sc_test/1,
-    is_overpaid_sc_test/1,
     close_sc_test/1,
     follow_sc_test/1
 ]).
@@ -41,7 +40,6 @@
 all() ->
     [
         is_active_sc_test,
-        is_overpaid_sc_test,
         close_sc_test,
         follow_sc_test
     ].
@@ -327,128 +325,6 @@ is_active_sc_test(Config) ->
         ResponseMsg2#{sc_id := <<"bad_id">>, sc_owner := SCOwner, active := false},
         ResponseMsg2
     ),
-    ok.
-
-is_overpaid_sc_test(Config) ->
-    %% exercise the unary API is_overpaid, supply it with an SC details and it should
-    %% confirm if it is overpaid or not
-    Connection = ?config(grpc_connection, Config),
-    [RouterNode, GatewayNode1 | _] = ?config(nodes, Config),
-    ct:pal("RouterNode: ~p", [RouterNode]),
-    ct:pal("GatewayNode1: ~p", [GatewayNode1]),
-    ConsensusMembers = ?config(consensus_members, Config),
-
-    %% Get router chain, swarm and pubkey_bin
-    RouterChain = ct_rpc:call(RouterNode, blockchain_worker, blockchain, []),
-    RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, swarm, []),
-    RouterPubkeyBin = ct_rpc:call(RouterNode, blockchain_swarm, pubkey_bin, []),
-
-    %% setup meck txn forwarding
-    Self = self(),
-    ok = sibyl_ct_utils:setup_meck_txn_forwarding(RouterNode, Self),
-
-    %% Create OUI txn
-    SignedOUITxn = sibyl_ct_utils:create_oui_txn(1, RouterNode, [], 8),
-    ct:pal("SignedOUITxn: ~p", [SignedOUITxn]),
-
-    %% Create state channel open txn
-    ID = crypto:strong_rand_bytes(24),
-    ExpireWithin = 11,
-    Nonce = 1,
-    SignedSCOpenTxn = create_sc_open_txn(RouterNode, ID, ExpireWithin, 1, Nonce),
-    ct:pal("SignedSCOpenTxn: ~p", [SignedSCOpenTxn]),
-
-    %% Add block with oui and sc open txns
-    {ok, Block0} = sibyl_ct_utils:add_block(RouterNode, RouterChain, ConsensusMembers, [
-        SignedOUITxn,
-        SignedSCOpenTxn
-    ]),
-    ct:pal("Block0: ~p", [Block0]),
-
-    %% Get sc open block hash for verification later
-    _SCOpenBlockHash = blockchain_block:hash_block(Block0),
-
-    %% Fake gossip block
-    ok = ct_rpc:call(RouterNode, blockchain_gossip_handler, add_block, [
-        Block0,
-        RouterChain,
-        Self,
-        RouterSwarm
-    ]),
-
-    %% Wait till the block is gossiped
-    ok = sibyl_ct_utils:wait_until_local_height(2),
-
-    %% Checking that state channel got created properly
-    {true, _SC1} = check_sc_open(RouterNode, RouterChain, RouterPubkeyBin, ID),
-
-    %% Check that the nonce of the sc server is okay
-    ok = sibyl_ct_utils:wait_until(
-        fun() ->
-            {ok, 0} == ct_rpc:call(RouterNode, blockchain_state_channels_server, nonce, [ID])
-        end,
-        30,
-        timer:seconds(1)
-    ),
-
-    [ActiveSCID] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_ids, []),
-    %% pull the active SC from the router node, confirm it has same ID as one from ledger
-    %% and then use it to test the is_valid GRPC api
-    [ActiveSCPB] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_scs, []),
-    ct:pal("ActiveSCPB: ~p", [ActiveSCPB]),
-    SCOwner = blockchain_state_channel_v1:owner(ActiveSCPB),
-    SCID = blockchain_state_channel_v1:id(ActiveSCPB),
-
-    %% use the grpc APIs to confirm the state channel is overpaid
-    {ok, #{
-        headers := Headers1,
-        result := #{
-            msg := {is_overpaid_resp, ResponseMsg1},
-            height := _ResponseHeight1,
-            signature := _ResponseSig1
-        } = Result1
-    }} = grpc_client:unary(
-        Connection,
-        #{sc_id => SCID, sc_owner => SCOwner, total_dcs => 10},
-        'helium.gateway',
-        'is_overpaid_sc',
-        gateway_client_pb,
-        []
-    ),
-    ct:pal("Response1 Headers1: ~p", [Headers1]),
-    ct:pal("Response1 Body1: ~p", [Result1]),
-    #{<<":status">> := HttpStatus1} = Headers1,
-    ?assertEqual(HttpStatus1, <<"200">>),
-    ?assertEqual(
-        ResponseMsg1#{sc_id := ActiveSCID, sc_owner := SCOwner, overpaid := false},
-        ResponseMsg1
-    ),
-
-    {ok, #{
-        headers := Headers2,
-        result := #{
-            msg := {is_overpaid_resp, ResponseMsg2},
-            height := _ResponseHeight2,
-            signature := _ResponseSig2
-        } = Result2
-    }} = grpc_client:unary(
-        Connection,
-        #{sc_id => SCID, sc_owner => SCOwner, total_dcs => 30},
-        'helium.gateway',
-        'is_overpaid_sc',
-        gateway_client_pb,
-        []
-    ),
-
-    ct:pal("Response Headers2: ~p", [Headers2]),
-    ct:pal("Response Body2: ~p", [Result2]),
-    #{<<":status">> := HttpStatus2} = Headers2,
-    ?assertEqual(HttpStatus2, <<"200">>),
-    ?assertEqual(
-        ResponseMsg2#{sc_id := ActiveSCID, sc_owner := SCOwner, overpaid := true},
-        ResponseMsg2
-    ),
-
     ok.
 
 close_sc_test(Config) ->
