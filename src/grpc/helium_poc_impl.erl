@@ -420,14 +420,14 @@ maybe_init_stream_state(_RPC, _HandlerState, StreamState) ->
 
 send_poc_report(OnionKeyHash, POC, Report) ->
     send_poc_report(OnionKeyHash, POC, Report, 30).
-send_poc_report(OnionKeyHash, POC, Report, Retries) when Retries > 0 ->
+send_poc_report(OnionKeyHash, POC, {ReportType, Report}, Retries) when Retries > 0 ->
     Challenger = blockchain_ledger_poc_v3:challenger(POC),
     SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
     P2PAddr = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
     case SelfPubKeyBin =:= Challenger of
         true ->
             lager:info("challenger is ourself so sending directly to poc statem"),
-            blockchain_poc_mgr:report(Report, OnionKeyHash, SelfPubKeyBin, P2PAddr);
+            blockchain_poc_mgr:report({ReportType, Report}, OnionKeyHash, SelfPubKeyBin, P2PAddr);
         false ->
             case miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2PAddr, []) of
                 {error, _Reason} ->
@@ -439,7 +439,10 @@ send_poc_report(OnionKeyHash, POC, Report, Retries) when Retries > 0 ->
                     timer:sleep(timer:seconds(30)),
                     send_poc_report(OnionKeyHash, POC, Report, Retries - 1);
                 {ok, P2PStream} ->
-                    _ = blockchain_poc_report_handler:send(P2PStream, {OnionKeyHash, Report}),
+                    %% encode the report before sending over p2p
+                    ReportEncoded = blockchain_poc_response_v1:encode(Report),
+                    Payload = term_to_binary({OnionKeyHash, ReportEncoded}),
+                    _ = blockchain_poc_report_handler:send(P2PStream, Payload),
                     ok
             end
     end;
