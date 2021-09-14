@@ -150,11 +150,26 @@ is_active_sc(
 ) ->
     lager:info("executing RPC is_active with msg ~p", [_Message]),
     {ok, CurHeight} = get_height(),
-    Response0 = #gateway_sc_is_active_resp_v1_pb{
-        active = check_is_active_sc(SCID, SCOwner, Chain),
-        sc_id = SCID,
-        sc_owner = SCOwner
-    },
+    Ledger = blockchain:ledger(Chain),
+    Response0 =
+        case get_ledger_state_channel(SCID, SCOwner, Ledger) of
+            {ok, Mod, SC} ->
+                #gateway_sc_is_active_resp_v1_pb{
+                    active = true,
+                    sc_id = SCID,
+                    sc_owner = SCOwner,
+                    sc_expiry_at_block = Mod:expire_at_block(SC),
+                    sc_original_dc_amount = get_sc_original(Mod, SC)
+                };
+            _ ->
+                #gateway_sc_is_active_resp_v1_pb{
+                    active = false,
+                    sc_id = SCID,
+                    sc_owner = SCOwner,
+                    sc_expiry_at_block = undefined,
+                    sc_original_dc_amount = undefined
+                }
+        end,
     Response1 = sibyl_utils:encode_gateway_resp_v1(
         Response0,
         CurHeight,
@@ -640,18 +655,6 @@ send_follow_msg(SCID, SCOwner, {SCNewState, SendList}, Height, _SCOldState, Stre
     NewStreamState = grpcbox_stream:send(false, Msg1, StreamState),
     {true, NewStreamState, [SCID | SendList]}.
 
--spec check_is_active_sc(
-    SCID :: binary(),
-    SCOwner :: libp2p_crypto:pubkey_bin(),
-    Chain :: blockchain:blockchain()
-) -> true | false.
-check_is_active_sc(SCID, SCOwner, Chain) ->
-    Ledger = blockchain:ledger(Chain),
-    case get_ledger_state_channel(SCID, SCOwner, Ledger) of
-        {ok, _Mod, _SC} -> true;
-        _ -> false
-    end.
-
 -spec check_is_overpaid_sc(
     SCID :: binary(),
     SCOwner :: libp2p_crypto:pubkey_bin(),
@@ -695,3 +698,14 @@ deserialize_sc(SC = <<1, _/binary>>) ->
     {v1, blockchain_ledger_state_channel_v1:deserialize(SC)};
 deserialize_sc(SC = <<2, _/binary>>) ->
     {v2, blockchain_ledger_state_channel_v2:deserialize(SC)}.
+
+-spec get_sc_original(
+    blockchain_ledger_state_channel_v1
+    | blockchain_ledger_state_channel_v2,
+    blockchain_ledger_state_channel_v1:state_channel()
+    | blockchain_ledger_state_channel_v2:state_channel()
+) -> non_neg_integer().
+get_sc_original(blockchain_ledger_state_channel_v1, _SC) ->
+    0;
+get_sc_original(blockchain_ledger_state_channel_v2, SC) ->
+    blockchain_ledger_state_channel_v2:original(SC).
