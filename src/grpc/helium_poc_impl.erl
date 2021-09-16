@@ -132,7 +132,7 @@ check_challenge_target(
         challengee_sig = Signature
     } = Request
 ) ->
-    lager:info("executing RPC check_target with msg ~p", [Request]),
+    lager:info("executing RPC check_challenge_target with msg ~p", [Request]),
     Ledger = blockchain:ledger(Chain),
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
     PubKey = libp2p_crypto:bin_to_pubkey(ChallengeePubKeyBin),
@@ -200,13 +200,7 @@ send_report(
                 %% we now need to route those reports to the challenger over p2p
                 %% clients cannot send a report directly to the challenger as in the case
                 %% of a witness report, it has no data on who the challenger is
-                spawn_link(fun() -> send_poc_report(OnionKeyHash, PublicPoC, Report) end),
-                %%                lists:foreach(
-                %%                    fun(PoC) ->
-                %%                        spawn_link(fun() -> send_poc_report(OnionKeyHash, PublicPoC, Report) end)
-                %%                    end,
-                %%                    PoCs
-                %%                ),
+                spawn(fun() -> send_poc_report(OnionKeyHash, PublicPoC, Report) end),
                 #gateway_success_resp_pb{resp = <<"ok">>, details = <<>>};
             _ ->
                 #gateway_error_resp_pb{error = <<"invalid onion key hash">>, details = OnionKeyHash}

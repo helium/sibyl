@@ -113,15 +113,10 @@ close_sc(Ctx, #gateway_sc_close_req_v1_pb{} = Message) ->
 ) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 follow_sc(#gateway_sc_follow_req_v1_pb{sc_id = SCID, sc_owner = SCOwner} = Msg, StreamState) ->
     Chain = sibyl_mgr:blockchain(),
-    lager:info("*** point 2", []),
     CurHandlerState = grpcbox_stream:stream_handler_state(StreamState),
-    lager:info("*** point 3", []),
     StreamState0 = maybe_init_stream_state(follow_sc, CurHandlerState, StreamState),
-    lager:info("*** point 4", []),
     #{sc_follows := SCFollows} = grpcbox_stream:stream_handler_state(StreamState0),
-    lager:info("*** point 5", []),
     Key = blockchain_ledger_v1:state_channel_key(SCID, SCOwner),
-    lager:info("*** point 6", []),
     follow_sc(Chain, maps:is_key(Key, SCFollows), Msg, StreamState0).
 
 -spec handle_info(any(), grpcbox_stream:t()) -> grpcbox_stream:t().
