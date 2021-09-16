@@ -132,7 +132,7 @@ check_challenge_target(
         challengee_sig = Signature
     } = Request
 ) ->
-    lager:info("executing RPC check_challenge_target with msg ~p", [Request]),
+    lager:info("executing RPC check_target with msg ~p", [Request]),
     Ledger = blockchain:ledger(Chain),
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
     PubKey = libp2p_crypto:bin_to_pubkey(ChallengeePubKeyBin),
@@ -144,7 +144,7 @@ check_challenge_target(
             {grpc_error, {grpcbox_stream:code_to_status(14), <<"bad signature">>}};
         true ->
             %% are we the target  ?
-            case blockchain_poc_mgr:check_target(ChallengeePubKeyBin, BlockHash, POCKey, Chain) of
+            case blockchain_poc_mgr:check_target(ChallengeePubKeyBin, BlockHash, POCKey) of
                 {error, Reason} ->
                     %% something went wrong, return error
                     {grpc_error, {grpcbox_stream:code_to_status(14), Reason}};
@@ -217,46 +217,6 @@ send_report(
         sibyl_mgr:sigfun()
     ),
     {ok, Resp, Ctx}.
-%%
-%%-spec send_report(
-%%    undefined | blockchain:blockchain(),
-%%    ctx:ctx(),
-%%    gateway_pb:gateway_poc_report_req_v1_pb()
-%%) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
-%%send_report(undefined = _Chain, _Ctx, #gateway_poc_report_req_v1_pb{} = _Msg) ->
-%%    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
-%%    {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
-%%send_report(
-%%    Chain,
-%%    Ctx,
-%%    #gateway_poc_report_req_v1_pb{msg = Report, onion_key_hash = OnionKeyHash} = _Message
-%%) ->
-%%    lager:info("executing RPC send_report with msg ~p", [_Message]),
-%%    Chain = sibyl_mgr:blockchain(),
-%%    Ledger = blockchain:ledger(Chain),
-%%    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
-%%    %% check the onionkeyhash is a valid POC on this node
-%%    RespPB =
-%%        case blockchain_poc_mgr:cached_poc_key(OnionKeyHash) of
-%%            false ->
-%%                lager:info("*** send_report failed to find poc", []),
-%%                #gateway_error_resp_pb{
-%%                    error = <<"invalid onion_key_hash">>,
-%%                    details = OnionKeyHash
-%%                };
-%%            {ok, _} ->
-%%                lager:info("*** send_report found poc", []),
-%%                PubKeyBin = blockchain_swarm:pubkey_bin(),
-%%                P2PAddr = libp2p_crypto:pubkey_bin_to_p2p(PubKeyBin),
-%%                blockchain_poc_mgr:report(Report, OnionKeyHash, PubKeyBin, P2PAddr),
-%%                #gateway_success_resp_pb{resp = <<"ok">>, details = <<>>}
-%%        end,
-%%    Resp = sibyl_utils:encode_gateway_resp_v1(
-%%        RespPB,
-%%        CurHeight,
-%%        sibyl_mgr:sigfun()
-%%    ),
-%%    {ok, Resp, Ctx}.
 
 -spec address_to_public_uri(
     undefined | blockchain:blockchain(),
@@ -420,14 +380,15 @@ maybe_init_stream_state(_RPC, _HandlerState, StreamState) ->
 
 send_poc_report(OnionKeyHash, POC, Report) ->
     send_poc_report(OnionKeyHash, POC, Report, 30).
-send_poc_report(OnionKeyHash, POC, {ReportType, Report}, Retries) when Retries > 0 ->
+send_poc_report(OnionKeyHash, POC, Report, Retries) when Retries > 0 ->
     Challenger = blockchain_ledger_poc_v3:challenger(POC),
     SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
     P2PAddr = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
     case SelfPubKeyBin =:= Challenger of
         true ->
             lager:info("challenger is ourself so sending directly to poc statem"),
-            blockchain_poc_mgr:report({ReportType, Report}, OnionKeyHash, SelfPubKeyBin, P2PAddr);
+            ok = blockchain_poc_mgr:report(Report, OnionKeyHash, SelfPubKeyBin, P2PAddr),
+            ok;
         false ->
             case miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2PAddr, []) of
                 {error, _Reason} ->
@@ -439,10 +400,7 @@ send_poc_report(OnionKeyHash, POC, {ReportType, Report}, Retries) when Retries >
                     timer:sleep(timer:seconds(30)),
                     send_poc_report(OnionKeyHash, POC, Report, Retries - 1);
                 {ok, P2PStream} ->
-                    %% encode the report before sending over p2p
-                    ReportEncoded = blockchain_poc_response_v1:encode(Report),
-                    Payload = term_to_binary({OnionKeyHash, ReportEncoded}),
-                    _ = blockchain_poc_report_handler:send(P2PStream, Payload),
+                    _ = blockchain_poc_report_handler:send(P2PStream, {OnionKeyHash, Report}),
                     ok
             end
     end;
