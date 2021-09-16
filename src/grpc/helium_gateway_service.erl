@@ -133,7 +133,6 @@ poc_key_to_public_uri(Ctx, Message) ->
     grpcbox_stream:t()
 ) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 stream({gateway_stream_req_v1_pb, {follow_req, Msg}}, StreamState) ->
-    lager:info("*** point 1", []),
     helium_state_channels_impl:follow_sc(Msg, StreamState);
 stream({gateway_stream_req_v1_pb, {routing_req, Msg}}, StreamState) ->
     helium_routing_impl:routing(Msg, StreamState);

@@ -374,7 +374,7 @@ maybe_init_stream_state(_RPC, _HandlerState, StreamState) ->
 
 send_poc_report(OnionKeyHash, POC, Report) ->
     send_poc_report(OnionKeyHash, POC, Report, 30).
-send_poc_report(OnionKeyHash, POC, Report, Retries) when Retries > 0 ->
+send_poc_report(OnionKeyHash, POC, {ReportType, Report}, Retries) when Retries > 0 ->
     Challenger = blockchain_ledger_poc_v3:challenger(POC),
     SelfPubKeyBin = blockchain_swarm:pubkey_bin(),
     P2PAddr = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
@@ -386,15 +386,16 @@ send_poc_report(OnionKeyHash, POC, Report, Retries) when Retries > 0 ->
         false ->
             case miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2PAddr, []) of
                 {error, _Reason} ->
-                    %% TODO add a retry attempt limit
                     lager:error(
                         "failed to dial challenger ~p (~p).  Will try agai in 30 seconds",
                         [P2PAddr, _Reason]
                     ),
                     timer:sleep(timer:seconds(30)),
-                    send_poc_report(OnionKeyHash, POC, Report, Retries - 1);
+                    send_poc_report(OnionKeyHash, POC, {ReportType, Report}, Retries - 1);
                 {ok, P2PStream} ->
-                    _ = blockchain_poc_report_handler:send(P2PStream, {OnionKeyHash, Report}),
+                    EncodedReport = blockchain_poc_response_v1:encode(Report),
+                    Bin = term_to_binary({OnionKeyHash, EncodedReport}),
+                    _ = blockchain_poc_report_handler:send(P2PStream, Bin),
                     ok
             end
     end;
