@@ -380,59 +380,8 @@ handle_event(
             {v1, _SC} ->
                 StreamState;
             {v2, SC} ->
-                case blockchain_ledger_state_channel_v2:close_state(SC) of
-                    closed ->
-                        #handler_state{sc_closes_sent = SCClosesSent, sc_follows = SCFollows} =
-                            HandlerState = grpcbox_stream:stream_handler_state(
-                                StreamState
-                            ),
-                        %% use the ledger key to get the standalone SC ID from our follow list
-                        case maps:get(LedgerSCID, SCFollows, not_found) of
-                            {SCMod, SCID, SCOwner, SCExpireAtHeight, SCLastState, SCLastBlockTime} ->
-                                {ok, CurHeight} = get_height(),
-                                lager:info(
-                                    "got PUT for V2 SC ~p with close state ~p at height ~p",
-                                    [
-                                        SCID,
-                                        ?SC_CLOSED,
-                                        CurHeight
-                                    ]
-                                ),
-
-                                {WasSent, NewStreamState, NewClosesSent} = maybe_send_follow_msg(
-                                    lists:member(SCID, SCClosesSent),
-                                    SCID,
-                                    SCOwner,
-                                    {?SC_CLOSED, SCClosesSent},
-                                    CurHeight,
-                                    SCLastState,
-                                    SCLastBlockTime,
-                                    StreamState
-                                ),
-                                UpdatedSCState =
-                                    case WasSent of
-                                        true -> ?SC_CLOSED;
-                                        false -> SCLastState
-                                    end,
-                                grpcbox_stream:stream_handler_state(
-                                    NewStreamState,
-                                    HandlerState#handler_state{
-                                        sc_follows = maps:put(
-                                            LedgerSCID,
-                                            {SCMod, SCID, SCOwner, SCExpireAtHeight, UpdatedSCState,
-                                                CurHeight},
-                                            SCFollows
-                                        ),
-                                        sc_closes_sent = NewClosesSent
-                                    }
-                                );
-                            not_found ->
-                                %% if we dont have a matching entry in the follow list do nothing
-                                StreamState
-                        end;
-                    _ ->
-                        StreamState
-                end
+                SCCloseState = blockchain_ledger_state_channel_v2:close_state(SC),
+                process_close_state(SCCloseState, LedgerSCID, StreamState)
         end,
     FinalStreamState;
 handle_event(
@@ -668,6 +617,108 @@ check_is_overpaid_sc(SCID, SCOwner, TotalDCs, Chain) ->
             blockchain_ledger_state_channel_v2:original(SC) < TotalDCs;
         _ ->
             false
+    end.
+
+-spec process_close_state(
+    CloseState :: closed | dispute,
+    LedgerSCID :: binary(),
+    StreamState :: grpcbox_stream:t()
+) -> grpcbox_stream:t().
+process_close_state(closed, LedgerSCID, StreamState) ->
+    #handler_state{sc_closes_sent = SCClosesSent, sc_follows = SCFollows} =
+        HandlerState = grpcbox_stream:stream_handler_state(
+            StreamState
+        ),
+    %% use the ledger key to get the standalone SC ID from our follow list
+    case maps:get(LedgerSCID, SCFollows, not_found) of
+        {SCMod, SCID, SCOwner, SCExpireAtHeight, SCLastState, SCLastBlockTime} ->
+            {ok, CurHeight} = get_height(),
+            lager:info(
+                "got PUT for V2 SC ~p with close state ~p at height ~p",
+                [
+                    SCID,
+                    ?SC_CLOSED,
+                    CurHeight
+                ]
+            ),
+
+            {WasSent, NewStreamState, NewClosesSent} = maybe_send_follow_msg(
+                lists:member(SCID, SCClosesSent),
+                SCID,
+                SCOwner,
+                {?SC_CLOSED, SCClosesSent},
+                CurHeight,
+                SCLastState,
+                SCLastBlockTime,
+                StreamState
+            ),
+            UpdatedSCState =
+                case WasSent of
+                    true -> ?SC_CLOSED;
+                    false -> SCLastState
+                end,
+            grpcbox_stream:stream_handler_state(
+                NewStreamState,
+                HandlerState#handler_state{
+                    sc_follows = maps:put(
+                        LedgerSCID,
+                        {SCMod, SCID, SCOwner, SCExpireAtHeight, UpdatedSCState, CurHeight},
+                        SCFollows
+                    ),
+                    sc_closes_sent = NewClosesSent
+                }
+            );
+        not_found ->
+            %% if we dont have a matching entry in the follow list do nothing
+            StreamState
+    end;
+process_close_state(dispute, LedgerSCID, StreamState) ->
+    #handler_state{sc_disputes_sent = SCDisputesSent, sc_follows = SCFollows} =
+        HandlerState = grpcbox_stream:stream_handler_state(
+            StreamState
+        ),
+    %% use the ledger key to get the standalone SC ID from our follow list
+    case maps:get(LedgerSCID, SCFollows, not_found) of
+        {SCMod, SCID, SCOwner, SCExpireAtHeight, SCLastState, SCLastBlockTime} ->
+            {ok, CurHeight} = get_height(),
+            lager:info(
+                "got PUT for V2 SC ~p with dispute state ~p at height ~p",
+                [
+                    SCID,
+                    ?SC_DISPUTE,
+                    CurHeight
+                ]
+            ),
+
+            {WasSent, NewStreamState, NewDisputesSent} = maybe_send_follow_msg(
+                lists:member(SCID, SCDisputesSent),
+                SCID,
+                SCOwner,
+                {?SC_DISPUTE, SCDisputesSent},
+                CurHeight,
+                SCLastState,
+                SCLastBlockTime,
+                StreamState
+            ),
+            UpdatedSCState =
+                case WasSent of
+                    true -> ?SC_DISPUTE;
+                    false -> SCLastState
+                end,
+            grpcbox_stream:stream_handler_state(
+                NewStreamState,
+                HandlerState#handler_state{
+                    sc_follows = maps:put(
+                        LedgerSCID,
+                        {SCMod, SCID, SCOwner, SCExpireAtHeight, UpdatedSCState, CurHeight},
+                        SCFollows
+                    ),
+                    sc_disputes_sent = NewDisputesSent
+                }
+            );
+        not_found ->
+            %% if we dont have a matching entry in the follow list do nothing
+            StreamState
     end.
 
 -spec get_ledger_state_channel(binary(), binary(), blockchain_ledger_v1:ledger()) ->
