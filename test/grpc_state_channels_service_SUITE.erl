@@ -299,7 +299,13 @@ is_active_sc_test(Config) ->
     #{<<":status">> := HttpStatus1} = Headers1,
     ?assertEqual(HttpStatus1, <<"200">>),
     ?assertEqual(
-        ResponseMsg1#{sc_id := ActiveSCID, sc_owner := SCOwner, active := true, sc_expiry_at_block := 12, sc_original_dc_amount := 20},
+        ResponseMsg1#{
+            sc_id := ActiveSCID,
+            sc_owner := SCOwner,
+            active := true,
+            sc_expiry_at_block := 12,
+            sc_original_dc_amount := 20
+        },
         ResponseMsg1
     ),
 
@@ -325,7 +331,13 @@ is_active_sc_test(Config) ->
     #{<<":status">> := HttpStatus2} = Headers2,
     ?assertEqual(HttpStatus2, <<"200">>),
     ?assertEqual(
-        ResponseMsg2#{sc_id := <<"bad_id">>, sc_owner := SCOwner, active := false, sc_expiry_at_block := 0, sc_original_dc_amount := 0},
+        ResponseMsg2#{
+            sc_id := <<"bad_id">>,
+            sc_owner := SCOwner,
+            active := false,
+            sc_expiry_at_block := 0,
+            sc_original_dc_amount := 0
+        },
         ResponseMsg2
     ),
     ok.
