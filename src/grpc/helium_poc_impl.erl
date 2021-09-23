@@ -144,7 +144,7 @@ check_challenge_target(
             {grpc_error, {grpcbox_stream:code_to_status(14), <<"bad signature">>}};
         true ->
             %% are we the target  ?
-            POCMgr = application:get_env(sibyl, poc_mgr_mod),
+            {ok, POCMgr} = application:get_env(sibyl, poc_mgr_mod),
             case POCMgr:check_target(ChallengeePubKeyBin, BlockHash, POCKey) of
                 {error, Reason} ->
                     %% something went wrong, return error
@@ -387,7 +387,7 @@ send_poc_report(OnionKeyHash, POC, Report, Retries) when Retries > 0 ->
     P2PAddr = libp2p_crypto:pubkey_bin_to_p2p(Challenger),
     case SelfPubKeyBin =:= Challenger of
         true ->
-            POCMgr = application:get_env(sibyl, poc_mgr_mod),
+            {ok, POCMgr} = application:get_env(sibyl, poc_mgr_mod),
             lager:info("challenger is ourself so sending directly to poc statem"),
             ok = POCMgr:report(Report, OnionKeyHash, SelfPubKeyBin, P2PAddr),
             ok;
@@ -402,7 +402,7 @@ send_poc_report(OnionKeyHash, POC, Report, Retries) when Retries > 0 ->
                     timer:sleep(timer:seconds(30)),
                     send_poc_report(OnionKeyHash, POC, Report, Retries - 1);
                 {ok, P2PStream} ->
-                    POCReportHandler = application:get_env(sibyl, poc_report_handler),
+                    {ok, POCReportHandler} = application:get_env(sibyl, poc_report_handler),
                     _ = POCReportHandler:send(P2PStream, {OnionKeyHash, Report}),
                     ok
             end
