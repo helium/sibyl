@@ -382,7 +382,7 @@ send_poc_report(OnionKeyHash, POC, {ReportType, Report}, Retries) when Retries >
     case SelfPubKeyBin =:= Challenger of
         true ->
             {ok, POCMgr} = application:get_env(sibyl, poc_mgr_mod),
-            lager:info("challenger is ourself so sending directly to poc statem"),
+            lager:info("challenger is ourself so sending directly to poc mgr: ~p", [POCMgr]),
             ok = POCMgr:report({ReportType, Report}, OnionKeyHash, SelfPubKeyBin, P2PAddr),
             ok;
         false ->
@@ -396,8 +396,9 @@ send_poc_report(OnionKeyHash, POC, {ReportType, Report}, Retries) when Retries >
                     send_poc_report(OnionKeyHash, POC, {ReportType, Report}, Retries - 1);
                 {ok, P2PStream} ->
                     {ok, POCReportHandler} = application:get_env(sibyl, poc_report_handler),
+                    lager:info("sending report to report handler ~p",[POCReportHandler]),
                     Data = blockchain_poc_response_v1:encode(Report),
-                    Payload = term_to_binary({ReportType, Data}),
+                    Payload = term_to_binary({OnionKeyHash, Data}),
                     _ = POCReportHandler:send(P2PStream, Payload),
                     ok
             end
