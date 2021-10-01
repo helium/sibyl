@@ -326,7 +326,7 @@ region_params(
     Ledger = blockchain:ledger(Chain),
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
     RespPB =
-        case blockchain_region_params_v1:for_region(Region, Ledger) of
+        case blockchain_region_params_v1:for_region(binary_to_atom(Region, utf8), Ledger) of
             {error, Reason} ->
                 lager:error(
                     "Could not get params for region: ~p, reason: ~p",
@@ -348,6 +348,7 @@ region_params(
         CurHeight,
         sibyl_mgr:sigfun()
     ),
+    lager:info("region Resp: ~p", [Resp]),
     {ok, Resp, Ctx}.
 
 -spec pocs(
