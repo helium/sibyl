@@ -39,7 +39,8 @@
     check_challenge_target/2,
     send_report/2,
     address_to_public_uri/2,
-    poc_key_to_public_uri/2
+    poc_key_to_public_uri/2,
+    region_params/2
 ]).
 
 %% Stream API
@@ -125,6 +126,12 @@ address_to_public_uri(Ctx, Message) ->
 poc_key_to_public_uri(Ctx, Message) ->
     helium_poc_impl:poc_key_to_public_uri(Ctx, Message).
 
+-spec region_params(
+    ctx:ctx(),
+    gateway_pb:gateway_poc_region_params_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+region_params(Ctx, Message) ->
+    helium_poc_impl:region_params(Ctx, Message).
 %%%-------------------------------------------------------------------
 %% Streaming RPC implementations
 %%%-------------------------------------------------------------------
