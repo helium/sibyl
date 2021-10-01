@@ -19,7 +19,8 @@
     check_challenge_target/2,
     send_report/2,
     address_to_public_uri/2,
-    poc_key_to_public_uri/2
+    poc_key_to_public_uri/2,
+    region_params/2
 ]).
 
 %% ------------------------------------------------------------------
@@ -65,6 +66,14 @@ address_to_public_uri(Ctx, #gateway_address_routing_data_req_v1_pb{} = Message) 
 poc_key_to_public_uri(Ctx, #gateway_poc_key_routing_data_req_v1_pb{} = Message) ->
     Chain = sibyl_mgr:blockchain(),
     poc_key_to_public_uri(Chain, Ctx, Message).
+
+-spec region_params(
+    ctx:ctx(),
+    gateway_pb:gateway_poc_region_params_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+region_params(Ctx, #gateway_poc_region_params_req_v1_pb{} = Message) ->
+    Chain = sibyl_mgr:blockchain(),
+    region_params(Chain, Ctx, Message).
 
 -spec pocs(
     gateway_pb:gateway_poc_req_v1(),
@@ -305,6 +314,48 @@ poc_key_to_public_uri(
     ),
     {ok, Resp, Ctx}.
 
+-spec region_params(
+    undefined | blockchain:blockchain(),
+    ctx:ctx(),
+    gateway_pb:gateway_poc_region_params_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+region_params(undefined = _Chain, _Ctx, #gateway_poc_region_params_req_v1_pb{} = _Msg) ->
+    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
+    {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
+region_params(
+    Chain,
+    Ctx,
+    #gateway_poc_region_params_req_v1_pb{region = Region} = _Message
+) ->
+    lager:info("executing RPC region_params with msg ~p", [_Message]),
+    Chain = sibyl_mgr:blockchain(),
+    Ledger = blockchain:ledger(Chain),
+    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
+    RespPB =
+        case blockchain_region_params_v1:for_region(Region, Ledger) of
+            {error, Reason} ->
+                lager:error(
+                    "Could not get params for region: ~p, reason: ~p",
+                    [Region, Reason]
+                ),
+                #gateway_error_resp_pb{
+                    error = <<"failed_to_get_region_params">>,
+                    details = Region
+                };
+            {ok, Params} ->
+                #gateway_poc_region_params_resp_v1_pb{
+                    region = Region,
+                    params = Params
+                }
+        end,
+    lager:info("region RespPB: ~p", [RespPB]),
+    Resp = sibyl_utils:encode_gateway_resp_v1(
+        RespPB,
+        CurHeight,
+        sibyl_mgr:sigfun()
+    ),
+    {ok, Resp, Ctx}.
+
 -spec pocs(
     blockchain:blockchain(),
     boolean(),
@@ -334,6 +385,7 @@ pocs(
     #gateway_poc_req_v1_pb{address = Addr, signature = Sig} = Msg,
     StreamState
 ) ->
+    lager:info("executing RPC pocs with msg ~p", [Msg]),
     %% start a POC stream
     %% confirm the sig is valid
     PubKey = libp2p_crypto:bin_to_pubkey(Addr),
@@ -403,7 +455,7 @@ send_poc_report(OnionKeyHash, POC, {ReportType, Report}, Retries) when Retries >
                     send_poc_report(OnionKeyHash, POC, Report, Retries - 1);
                 {ok, P2PStream} ->
                     {ok, POCReportHandler} = application:get_env(sibyl, poc_report_handler),
-                    lager:info("sending report to report handler ~p",[POCReportHandler]),
+                    lager:info("sending report to report handler ~p", [POCReportHandler]),
                     Data = blockchain_poc_response_v1:encode(Report),
                     Payload = term_to_binary({OnionKeyHash, Data}),
                     _ = POCReportHandler:send(P2PStream, Payload),
