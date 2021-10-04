@@ -319,28 +319,63 @@ region_params(undefined = _Chain, _Ctx, #gateway_poc_region_params_req_v1_pb{} =
 region_params(
     Chain,
     Ctx,
-    #gateway_poc_region_params_req_v1_pb{region = Region} = _Message
+    #gateway_poc_region_params_req_v1_pb{address = Addr, signature = Signature} = Request
 ) ->
-    lager:info("executing RPC region_params with msg ~p", [_Message]),
+    lager:info("executing RPC region_params with msg ~p", [Request]),
     Chain = sibyl_mgr:blockchain(),
     Ledger = blockchain:ledger(Chain),
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
+    BaseReq = Request#gateway_poc_region_params_req_v1_pb{signature = <<>>},
+    EncodedReq = gateway_pb:encode_msg(BaseReq),
     RespPB =
-        case blockchain_region_params_v1:for_region(binary_to_atom(Region, utf8), Ledger) of
-            {error, Reason} ->
-                lager:error(
-                    "Could not get params for region: ~p, reason: ~p",
-                    [Region, Reason]
-                ),
+        case libp2p_crypto:verify(EncodedReq, Signature, Addr) of
+            false ->
                 #gateway_error_resp_pb{
-                    error = <<"failed_to_get_region_params">>,
-                    details = Region
+                    error = <<"bad_signature">>,
+                    details = Signature
                 };
-            {ok, Params} ->
-                #gateway_poc_region_params_resp_v1_pb{
-                    region = Region,
-                    params = Params
-                }
+            true ->
+                case blockchain_ledger_v1:find_gateway_location(Addr, Ledger) of
+                    {ok, Location} ->
+                        case blockchain_region_v1:h3_to_region(Location, Ledger) of
+                            {ok, Region} ->
+                                case blockchain_region_params_v1:for_region(Region, Ledger) of
+                                    {error, Reason} ->
+                                        lager:error(
+                                            "Could not get params for region: ~p, reason: ~p",
+                                            [Region, Reason]
+                                        ),
+                                        #gateway_error_resp_pb{
+                                            error = <<"failed_to_get_region_params">>,
+                                            details = Region
+                                        };
+                                    {ok, Params} ->
+                                        #gateway_poc_region_params_resp_v1_pb{
+                                            address = Addr,
+                                            region = Region,
+                                            params = Params
+                                        }
+                                end;
+                            {error, Reason} ->
+                                lager:error(
+                                    "Could not get h3 region for location ~p, reason: ~p",
+                                    [Location, Reason]
+                                ),
+                                #gateway_error_resp_pb{
+                                    error = <<"failed_to_find_h3_region_for_location">>,
+                                    details = Location
+                                }
+                        end;
+                    {error, _Reason} ->
+                        lager:error(
+                            "Could not find location for pubkey: ~p",
+                            [Addr]
+                        ),
+                        #gateway_error_resp_pb{
+                            error = <<"no_location">>,
+                            details = Addr
+                        }
+                end
         end,
     lager:info("region RespPB: ~p", [RespPB]),
     Resp = sibyl_utils:encode_gateway_resp_v1(
