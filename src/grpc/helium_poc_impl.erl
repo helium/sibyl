@@ -210,7 +210,7 @@ send_report(
                 %% we now need to route those reports to the challenger over p2p
                 %% clients cannot send a report directly to the challenger as in the case
                 %% of a witness report, it has no data on who the challenger is
-                spawn_link(fun() -> send_poc_report(OnionKeyHash, PublicPoC, Report) end),
+                spawn(fun() -> send_poc_report(OnionKeyHash, PublicPoC, Report) end),
                 %%                lists:foreach(
                 %%                    fun(PoC) ->
                 %%                        spawn_link(fun() -> send_poc_report(OnionKeyHash, PublicPoC, Report) end)
