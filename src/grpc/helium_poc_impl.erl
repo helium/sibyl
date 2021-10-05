@@ -242,7 +242,6 @@ address_to_public_uri(
     RespPB =
         case sibyl_utils:address_data([Address]) of
             [] ->
-                lager:info("*** no public addr for ~p", [Address]),
                 #gateway_error_resp_pb{
                     error = <<"no_public_route_for_address">>,
                     details = Address
@@ -280,7 +279,6 @@ poc_key_to_public_uri(
     RespPB =
         case blockchain_ledger_v1:find_public_poc(OnionKeyHash, Ledger) of
             {error, not_found} ->
-                lager:info("*** poc not found for key ~p", [OnionKeyHash]),
                 #gateway_error_resp_pb{
                     error = <<"poc_not_found">>,
                     details = OnionKeyHash
@@ -289,7 +287,6 @@ poc_key_to_public_uri(
                 Challenger = blockchain_ledger_poc_v2:challenger(PoC),
                 case sibyl_utils:address_data([Challenger]) of
                     [] ->
-                        lager:info("*** no public addr for ~p", [Challenger]),
                         #gateway_error_resp_pb{
                             error = <<"no_public_route_for_challenger">>,
                             details = Challenger
@@ -325,10 +322,11 @@ region_params(
     Chain = sibyl_mgr:blockchain(),
     Ledger = blockchain:ledger(Chain),
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
+    PubKey = libp2p_crypto:bin_to_pubkey(Addr),
     BaseReq = Request#gateway_poc_region_params_req_v1_pb{signature = <<>>},
     EncodedReq = gateway_pb:encode_msg(BaseReq),
     RespPB =
-        case libp2p_crypto:verify(EncodedReq, Signature, Addr) of
+        case libp2p_crypto:verify(EncodedReq, Signature, PubKey) of
             false ->
                 #gateway_error_resp_pb{
                     error = <<"bad_signature">>,
@@ -352,8 +350,8 @@ region_params(
                                     {ok, Params} ->
                                         #gateway_poc_region_params_resp_v1_pb{
                                             address = Addr,
-                                            region = Region,
-                                            params = Params
+                                            region = atom_to_binary(Region, utf8),
+                                            params = #blockchain_region_params_v1_pb{region_params = Params}
                                         }
                                 end;
                             {error, Reason} ->
