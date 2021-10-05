@@ -55,6 +55,8 @@ encode_gateway_resp_v1(#gateway_poc_challenge_notification_resp_v1_pb{} = Msg, H
     do_encode_gateway_resp_v1({poc_challenge_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_poc_check_challenge_target_resp_v1_pb{} = Msg, Height, SigFun) ->
     do_encode_gateway_resp_v1({poc_check_target_resp, Msg}, Height, SigFun);
+encode_gateway_resp_v1(#gateway_poc_region_params_resp_v1_pb{} = Msg, Height, SigFun) ->
+    do_encode_gateway_resp_v1({poc_region_params_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_success_resp_pb{} = Msg, Height, SigFun) ->
     do_encode_gateway_resp_v1({success_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_error_resp_pb{} = Msg, Height, SigFun) ->
