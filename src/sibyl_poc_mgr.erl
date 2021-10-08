@@ -104,7 +104,7 @@ handle_add_block_event(
             {ok, CGMembers} = blockchain_ledger_v1:consensus_members(Ledger),
             [
                 begin
-                    ChallengerAddr = lists:index(CGPos, CGMembers),
+                    ChallengerAddr = lists:nth(CGPos, CGMembers),
                     spawn_link(
                         fun() ->
                             run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, Vars)
