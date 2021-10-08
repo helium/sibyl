@@ -101,13 +101,17 @@ handle_add_block_event(
             %% a POC will be active for each key
             %% for each notify all GWs in the target region
             %% telling them they have to contact the challenger to check if they are the actual target
+            {ok, CGMembers} = blockchain_ledger_v1:consensus_members(Ledger),
             [
-                spawn_link(
-                    fun() ->
-                        run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, Vars)
-                    end
-                )
-                || {ChallengerAddr, Key} <- PocEphemeralKeys
+                begin
+                    ChallengerAddr = lists:index(CGPos, CGMembers),
+                    spawn_link(
+                        fun() ->
+                            run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, Vars)
+                        end
+                    )
+                end
+                || {CGPos, Key} <- PocEphemeralKeys
             ],
             {noreply, State#state{}};
         _ ->

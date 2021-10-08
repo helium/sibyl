@@ -357,7 +357,9 @@ region_params(
                                         #gateway_poc_region_params_resp_v1_pb{
                                             address = Addr,
                                             region = atom_to_binary(Region, utf8),
-                                            params = #blockchain_region_params_v1_pb{region_params = Params}
+                                            params = #blockchain_region_params_v1_pb{
+                                                region_params = Params
+                                            }
                                         }
                                 end;
                             {error, Reason} ->

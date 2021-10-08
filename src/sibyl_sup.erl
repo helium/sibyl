@@ -65,12 +65,11 @@ init([POCTransportType]) ->
                 [?WORKER(sibyl_poc_mgr, SibylPocMgrOpts)];
             _ ->
                 []
-    end,
+        end,
     {ok,
         {?FLAGS,
             [
                 ?WORKER(sibyl_mgr, [SibylMgrOpts])
-            ] ++ POCServers
-        }}.
+            ] ++ POCServers}}.
 
 %% internal functions
