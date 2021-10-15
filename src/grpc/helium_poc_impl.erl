@@ -474,7 +474,8 @@ send_poc_report(OnionKeyHash, POC, {ReportType, Report}, Retries) when Retries >
             ok = POCMgr:report({ReportType, Report}, OnionKeyHash, SelfPubKeyBin, P2PAddr),
             ok;
         false ->
-            case miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2PAddr, []) of
+            {ok, POCReportHandler} = application:get_env(sibyl, poc_report_handler),
+            case miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2PAddr, POCReportHandler, []) of
                 {error, _Reason} ->
                     lager:error(
                         "failed to dial challenger ~p (~p).  Will try agai in 30 seconds",
@@ -483,7 +484,6 @@ send_poc_report(OnionKeyHash, POC, {ReportType, Report}, Retries) when Retries >
                     timer:sleep(timer:seconds(30)),
                     send_poc_report(OnionKeyHash, POC, {ReportType, Report}, Retries - 1);
                 {ok, P2PStream} ->
-                    {ok, POCReportHandler} = application:get_env(sibyl, poc_report_handler),
                     lager:info("sending report to report handler ~p", [POCReportHandler]),
                     Data = blockchain_poc_response_v1:encode(Report),
                     Payload = term_to_binary({OnionKeyHash, Data}),
