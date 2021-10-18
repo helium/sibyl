@@ -146,15 +146,14 @@ config_test(Config) ->
     Connection = ?config(grpc_connection, Config),
 
     %% use the grpc APIs to confirm the state channel is active
-%%    {ok, #{
-%%        headers := Headers1,
-%%        result := #{
-%%            msg := {config_resp, ResponseMsg1},
-%%            height := _ResponseHeight1,
-%%            signature := _ResponseSig1
-%%        } = Result1
-%%    }} = grpc_client:unary(
-    Res = grpc_client:unary(
+    {ok, #{
+        headers := Headers1,
+        result := #{
+            msg := {config_resp, ResponseMsg1},
+            height := _ResponseHeight1,
+            signature := _ResponseSig1
+        } = Result1
+    }} = grpc_client:unary(
         Connection,
         #{keys => [<<"sc_grace_blocks">>, <<"dc_payload_size">>]},
         'helium.gateway',
@@ -162,18 +161,68 @@ config_test(Config) ->
         gateway_client_pb,
         []
     ),
-    ct:pal("Response: ~p", [Res]),
-%%    ct:pal("Response Headers: ~p", [Headers1]),
-%%    ct:pal("Response Body: ~p", [Result1]),
-%%    #{<<":status">> := HttpStatus1} = Headers1,
-%%    ?assertEqual(HttpStatus1, <<"200">>),
-%%    #{result := KeyVals} = ResponseMsg1,
-%%    ?assertEqual(
-%%        [#{key => <<"sc_grace_blocks">>, val => 5}, #{key => <<"dc_payload_size">>, val => 24}],
-%%        KeyVals
-%%    ),
-    ?assertEqual(1, 0),
+    ct:pal("Response Headers: ~p", [Headers1]),
+    ct:pal("Response Body: ~p", [Result1]),
+    #{<<":status">> := HttpStatus1} = Headers1,
+    ?assertEqual(HttpStatus1, <<"200">>),
+    #{result := KeyVals} = ResponseMsg1,
+    ?assertEqual(
+        [#{key => <<"sc_grace_blocks">>, val => <<"5">>}, #{key => <<"dc_payload_size">>, val => <<"24">>}],
+        KeyVals
+    ),
+
+    %% test a request with invalid keys
+    {ok, #{
+        headers := Headers2,
+        result := #{
+            msg := {config_resp, ResponseMsg2},
+            height := _ResponseHeight2,
+            signature := _ResponseSig2
+        } = Result2
+    }} = grpc_client:unary(
+        Connection,
+        #{keys => [<<"bad_key1">>, <<"bad_key2">>]},
+        'helium.gateway',
+        'config',
+        gateway_client_pb,
+        []
+    ),
+    ct:pal("Response Headers: ~p", [Headers2]),
+    ct:pal("Response Body: ~p", [Result2]),
+    #{<<":status">> := HttpStatus2} = Headers2,
+    ?assertEqual(HttpStatus2, <<"200">>),
+    #{result := KeyVals2} = ResponseMsg2,
+    ?assertEqual(
+        [#{key => <<"bad_key1">>, val => <<"non_existent">>}, #{key => <<"bad_key2">>, val => <<"non_existent">>}],
+        KeyVals2
+    ),
+
+    %% test a request with too many keys
+    %% in test mode, max keys is 5, non test mode its 50
+    {ok, #{
+        headers := Headers3,
+        result := #{
+            msg := {error_resp, ResponseMsg3},
+            height := _ResponseHeight3,
+            signature := _ResponseSig3
+        } = Result3
+    }} = grpc_client:unary(
+        Connection,
+        #{keys => [<<"key1">>, <<"key2">>, <<"key3">>, <<"key4">>, <<"key5">>, <<"key6">>]},
+        'helium.gateway',
+        'config',
+        gateway_client_pb,
+        []
+    ),
+    ct:pal("Response Headers: ~p", [Headers3]),
+    ct:pal("Response Body: ~p", [Result3]),
+    #{<<":status">> := HttpStatus3} = Headers3,
+    ?assertEqual(HttpStatus3, <<"200">>),
+    #{error := ErrorMsg3, details := ErrorDetails3} = ResponseMsg3,
+    ?assertEqual(<<"max_key_size_exceeded">>, ErrorMsg3),
+    ?assertEqual(<<"limit 5. keys presented 6">>, ErrorDetails3),
     ok.
+
 
 %
 %% ------------------------------------------------------------------
