@@ -56,11 +56,9 @@ init(_Args) ->
     SibylMgrOpts = [{ets, sibyl_mgr:make_ets_table()}],
 
     {ok,
-        {?FLAGS,
-            [
-                ?WORKER(sibyl_mgr, [SibylMgrOpts]),
-                ?WORKER(sibyl_poc_mgr, [])
-            ]
-    }}.
+        {?FLAGS, [
+            ?WORKER(sibyl_mgr, [SibylMgrOpts]),
+            ?WORKER(sibyl_poc_mgr, [])
+        ]}}.
 
 %% internal functions

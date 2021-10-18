@@ -4,10 +4,18 @@
 -include("grpc/autogen/server/gateway_pb.hrl").
 
 -type gateway_resp_type() ::
-    gateway_pb:gateway_sc_is_valid_resp_v1_pb()
+    gateway_pb:gateway_success_resp_pb()
+    | gateway_pb:gateway_error_resp_pb()
+    | gateway_pb:gateway_sc_is_active_resp_v1_pb()
+    | gateway_pb:gateway_sc_is_overpaid_resp_v1_pb()
     | gateway_pb:gateway_sc_close_resp_v1_pb()
     | gateway_pb:gateway_sc_follow_streamed_resp_v1_pb()
-    | gateway_pb:gateway_routing_streamed_resp_v1_pb().
+    | gateway_pb:gateway_routing_streamed_resp_v1_pb()
+    | gateway_pb:gateway_poc_challenge_notification_resp_v1_pb()
+    | gateway_pb:gateway_poc_check_challenge_target_resp_v1_pb()
+    | gateway_pb:gateway_public_routing_data_resp_v1_pb()
+    | gateway_pb:gateway_poc_region_params_resp_v1_pb()
+    | gateway_pb:gateway_config_resp_v1_pb().
 
 %% API
 -export([
@@ -57,6 +65,8 @@ encode_gateway_resp_v1(#gateway_poc_check_challenge_target_resp_v1_pb{} = Msg, H
     do_encode_gateway_resp_v1({poc_check_target_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_poc_region_params_resp_v1_pb{} = Msg, Height, SigFun) ->
     do_encode_gateway_resp_v1({poc_region_params_resp, Msg}, Height, SigFun);
+encode_gateway_resp_v1(#gateway_config_resp_v1_pb{} = Msg, Height, SigFun) ->
+    do_encode_gateway_resp_v1({config_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_success_resp_pb{} = Msg, Height, SigFun) ->
     do_encode_gateway_resp_v1({success_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_error_resp_pb{} = Msg, Height, SigFun) ->
