@@ -24,6 +24,12 @@
     handle_info/3
 ]).
 
+%% general APIs
+-export([
+    address_to_public_uri/2,
+    config/2
+]).
+
 %% routing APIs
 -export([]).
 
@@ -38,7 +44,6 @@
 -export([
     check_challenge_target/2,
     send_report/2,
-    address_to_public_uri/2,
     poc_key_to_public_uri/2,
     region_params/2
 ]).
@@ -67,6 +72,15 @@ init(_RPC, StreamState) ->
 handle_info(_RPC, Msg, StreamState) ->
     #{mod := Module} = _HandlerState = grpcbox_stream:stream_handler_state(StreamState),
     Module:handle_info(Msg, StreamState).
+
+%%%-------------------------------------------------------------------
+%% General RPC implementations
+%%%-------------------------------------------------------------------
+-spec config(
+    ctx:ctx(),
+    gateway_pb:gateway_config_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+config(Ctx, Message) -> helium_general_impl:config(Ctx, Message).
 
 %%%-------------------------------------------------------------------
 %% Routing RPC implementations
@@ -117,7 +131,7 @@ send_report(Ctx, Message) ->
     gateway_pb:gateway_address_routing_data_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
 address_to_public_uri(Ctx, Message) ->
-    helium_poc_impl:address_to_public_uri(Ctx, Message).
+    helium_general_impl:address_to_public_uri(Ctx, Message).
 
 -spec poc_key_to_public_uri(
     ctx:ctx(),

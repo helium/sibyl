@@ -24,7 +24,7 @@
 ]).
 
 %% ------------------------------------------------------------------
-%% helium_gateway_state_channels_bhvr callbacks
+%% helium_gateway_poc_bhvr callbacks
 %% ------------------------------------------------------------------
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
 init(_RPC, StreamState) ->
@@ -481,7 +481,14 @@ send_poc_report(OnionKeyHash, POC, {ReportType, Report}, Retries) when Retries >
             ok;
         false ->
             {ok, POCReportHandler} = application:get_env(sibyl, poc_report_handler),
-            case miner_poc:dial_framed_stream(blockchain_swarm:swarm(), P2PAddr, POCReportHandler, []) of
+            case
+                miner_poc:dial_framed_stream(
+                    blockchain_swarm:swarm(),
+                    P2PAddr,
+                    POCReportHandler,
+                    []
+                )
+            of
                 {error, _Reason} ->
                     %% TODO add a retry attempt limit
                     lager:error(
