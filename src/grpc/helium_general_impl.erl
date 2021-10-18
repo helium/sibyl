@@ -3,6 +3,12 @@
 -include("../../include/sibyl.hrl").
 -include("../grpc/autogen/server/gateway_pb.hrl").
 
+-ifdef(TEST).
+-define(MAX_KEY_SIZE, 5).
+-else.
+-define(MAX_KEY_SIZE, 50).
+-endif.
+
 -type handler_state() :: #{
     mod => atom()
 }.
@@ -115,28 +121,37 @@ config(
     lager:info("executing RPC config with msg ~p", [Request]),
     Ledger = blockchain:ledger(Chain),
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
-    %% iterate over the keys submitted in the request and retrieve
-    %% current chain var value for each
-    Res =
-        lists:foldl(
-            fun(Key, Acc) ->
-                try
-                    case blockchain_ledger_v1:config(binary_to_existing_atom(Key, utf8), Ledger) of
-                        {ok, V} ->
-                            [#key_val_v1_pb{key = Key, val = V } | Acc];
-                        {error, _} ->
-                            [#key_val_v1_pb{key = Key, val = undefined } | Acc]
-                    end
-                catch _:_ ->
-                    [#key_val_v1_pb{key = Key, val = non_existent } | Acc]
-                end
-            end,
-            [],
-            Keys
-        ),
-    Response0 = #gateway_config_resp_v1_pb{
-        result = Res
-    },
+    NumKeys = length(Keys),
+    Response0 =
+        case NumKeys > ?MAX_KEY_SIZE of
+            true ->
+                #gateway_error_resp_pb{
+                    error = <<"max_key_size_exceeded">>,
+                    details = list_to_binary(lists:concat(["limit ", ?MAX_KEY_SIZE, ". keys presented ", NumKeys]))
+                };
+            false ->
+                %% iterate over the keys submitted in the request and retrieve
+                %% current chain var value for each
+                Res =
+                    lists:reverse(lists:foldl(
+                        fun(Key, Acc) ->
+                            try
+                                case blockchain_ledger_v1:config(binary_to_existing_atom(Key, utf8), Ledger) of
+                                    {ok, V} ->
+                                        [#key_val_v1_pb{key = Key, val = sibyl_utils:ensure(binary, V) } | Acc];
+                                    {error, _} ->
+                                        [#key_val_v1_pb{key = Key, val = <<"non_existent">> } | Acc]
+                                end
+                            catch _:_ ->
+                                [#key_val_v1_pb{key = Key, val = <<"non_existent">> } | Acc]
+                            end
+                        end,
+                        [],
+                        Keys
+                    ))   ,
+                #gateway_config_resp_v1_pb{result = Res}
+        end,
+
     Response1 = sibyl_utils:encode_gateway_resp_v1(
         Response0,
         CurHeight,
