@@ -346,6 +346,28 @@ validators_test(Config)->
     #{result := Validators2} = ResponseMsg2,
     ?assertEqual(5, length(Validators2)),
 
+    %% test the validators RPC min validators limit
+    {ok, #{
+        headers := Headers3,
+        result := #{
+            msg := {validators_resp, ResponseMsg3},
+            height := _ResponseHeight3,
+            signature := _ResponseSig3
+        } = Result3
+    }} = grpc_client:unary(
+        Connection,
+        #{quantity => 0},
+        'helium.gateway',
+        'validators',
+        gateway_client_pb,
+        []
+    ),
+    ct:pal("Response Headers: ~p", [Headers3]),
+    ct:pal("Response Body: ~p", [Result3]),
+    #{<<":status">> := HttpStatus3} = Headers3,
+    ?assertEqual(HttpStatus3, <<"200">>),
+    #{result := Validators3} = ResponseMsg3,
+    ?assertEqual(1, length(Validators3)),
     ok.
 %
 %% ------------------------------------------------------------------
