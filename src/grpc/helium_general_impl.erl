@@ -9,6 +9,12 @@
 -define(MAX_KEY_SIZE, 50).
 -endif.
 
+-ifdef(TEST).
+-define(VALIDATOR_LIMIT, 5).
+-else.
+-define(VALIDATOR_LIMIT, 50).
+-endif.
+
 -type handler_state() :: #{
     mod => atom()
 }.
@@ -21,7 +27,8 @@
 
 -export([
     address_to_public_uri/2,
-    config/2
+    config/2,
+    validators/2
 ]).
 
 %% ------------------------------------------------------------------
@@ -51,6 +58,14 @@ address_to_public_uri(Ctx, #gateway_address_routing_data_req_v1_pb{} = Message) 
 config(Ctx, #gateway_config_req_v1_pb{} = Message) ->
     Chain = sibyl_mgr:blockchain(),
     config(Chain, Ctx, Message).
+
+-spec validators(
+    ctx:ctx(),
+    gateway_pb:gateway_validators_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+validators(Ctx, #gateway_validators_req_v1_pb{} = Message) ->
+    Chain = sibyl_mgr:blockchain(),
+    validators(Chain, Ctx, Message).
 
 handle_info(
     _Msg,
@@ -158,6 +173,44 @@ config(
         sibyl_mgr:sigfun()
     ),
     {ok, Response1, Ctx}.
+
+-spec validators(
+    undefined | blockchain:blockchain(),
+    ctx:ctx(),
+    gateway_pb:gateway_validators_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+validators(
+    undefined = _Chain,
+    _Ctx,
+    #gateway_validators_req_v1_pb{} = _Msg
+) ->
+    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
+    {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
+validators(
+    Chain,
+    Ctx,
+    #gateway_validators_req_v1_pb{
+        quantity = NumVals
+    } = Request
+) ->
+    lager:info("executing RPC validators with msg ~p", [Request]),
+    Ledger = blockchain:ledger(Chain),
+    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
+    %% get list of current validators from the cache
+    %% and then get a random selection of these with size
+    %% equal to NumVals
+    Vals = sibyl_mgr:validators(),
+    RandomVals = blockchain_utils:shuffle(Vals),
+    SelectedVals =  lists:sublist(RandomVals, min(NumVals, ?VALIDATOR_LIMIT)),
+    lager:info("randomly selected validators: ~p", [SelectedVals]),
+    EncodedVals = [#routing_address_pb{pub_key = Addr, uri = Routing} || {Addr, Routing} <- SelectedVals],
+    Response = sibyl_utils:encode_gateway_resp_v1(
+        #gateway_validators_resp_v1_pb{result = EncodedVals},
+        CurHeight,
+        sibyl_mgr:sigfun()
+    ),
+    {ok, Response, Ctx}.
+
 
 %% ------------------------------------------------------------------
 %% Internal functions

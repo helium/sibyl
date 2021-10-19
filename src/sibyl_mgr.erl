@@ -3,26 +3,34 @@
 -behaviour(gen_server).
 
 -include("../include/sibyl.hrl").
+-include("grpc/autogen/server/gateway_pb.hrl").
 
 -define(TID, val_mgr).
 -define(CHAIN, blockchain).
 -define(HEIGHT, height).
 -define(SIGFUN, sigfun).
 -define(SERVER, ?MODULE).
+-define(VALIDATORS, validators).
 -define(ROUTING_CF_NAME, routing).
 -define(STATE_CHANNEL_CF_NAME, state_channels).
 
--type event_type() :: binary().
--type event_types() :: [event_type()].
--type event() :: {event, binary(), any()} | {event, binary()}.
-
--export_type([event_type/0, event_types/0, event/0]).
+-ifdef(TEST).
+-define(VALIDATOR_CACHE_REFRESH, 5).
+-else.
+-define(VALIDATOR_CACHE_REFRESH, 100).
+-endif.
 
 -record(state, {
     tid :: ets:tab(),
     commit_hook_refs = [] :: list()
 }).
 
+-type event_type() :: binary().
+-type event_types() :: [event_type()].
+-type event() :: {event, binary(), any()} | {event, binary()}.
+-type state() :: #state{}.
+
+-export_type([event_type/0, event_types/0, event/0]).
 %% ------------------------------------------------------------------
 %% gen_server exports
 %% ------------------------------------------------------------------
@@ -44,7 +52,8 @@
     get_last_modified/1,
     blockchain/0,
     height/0,
-    sigfun/0
+    sigfun/0,
+    validators/0
 ]).
 
 %% ------------------------------------------------------------------
@@ -103,6 +112,14 @@ sigfun() ->
         _:_ -> undefined
     end.
 
+-spec validators() -> function() | undefined.
+validators() ->
+    try ets:lookup_element(?TID, ?VALIDATORS, 2) of
+        X -> X
+    catch
+        _:_ -> []
+    end.
+
 make_ets_table() ->
     ets:new(
         ?TID,
@@ -155,6 +172,7 @@ handle_info(setup, State) ->
             ets:insert(?TID, {?SIGFUN, SigFun}),
             ets:insert(?TID, {?HEIGHT, CurHeight}),
             {ok, Refs} = add_commit_hooks(),
+            ok = update_validator_cache(Ledger),
             ok = subscribe_to_events(),
             {noreply, State#state{commit_hook_refs = Refs}}
     catch
@@ -165,6 +183,12 @@ handle_info(setup, State) ->
 handle_info({blockchain_event, {new_chain, NC}}, State = #state{commit_hook_refs = _Refs}) ->
     lager:debug("updating with new chain", []),
     ets:insert(?TID, {?CHAIN, NC}),
+    {noreply, State};
+handle_info({blockchain_event, {add_block, _BlockHash, Sync, _Ledger} = Event}, State) when
+    Sync =:= false
+->
+    lager:debug("received add block event, sync is ~p", [Sync]),
+    ok = process_add_block_event(Event, State),
     {noreply, State};
 handle_info(
     {event, EventTopic, _Payload} = _Msg,
@@ -197,6 +221,55 @@ terminate(_Reason, _State = #state{commit_hook_refs = Refs}) ->
 %% ------------------------------------------------------------------
 %% Internal functions
 %% ------------------------------------------------------------------
+-spec process_add_block_event(
+    Event :: {add_block, binary(), boolean(), blockchain_ledger_v1:ledger()},
+    State :: state()
+) -> ok.
+process_add_block_event({add_block, BlockHash, _Sync, Ledger}, _State) ->
+    Chain = ?MODULE:blockchain(),
+    case blockchain:get_block(BlockHash, Chain) of
+        {ok, Block} ->
+            BlockHeight = blockchain_block:height(Block),
+            %% update the list of validators in the cache every N blocks
+            case BlockHeight rem ?VALIDATOR_CACHE_REFRESH == 0 of
+                true ->
+                    ok = update_validator_cache(Ledger);
+                false ->
+                    ok
+            end;
+        _ ->
+            %% err what?
+            ok
+    end.
+
+-spec update_validator_cache(Ledger :: blockchain_ledger_v1:ledger()) -> ok.
+update_validator_cache(Ledger) ->
+    Vals =
+        blockchain_ledger_v1:cf_fold(
+            validators,
+            fun({Addr, _BinVal}, Acc) ->
+                case get_validator_routing(Addr) of
+                    {ok, URI} ->
+                        [{Addr, URI} | Acc];
+                    {error, _} ->
+                        Acc
+                end
+            end,
+            [],
+            Ledger
+        ),
+    _ = ets:insert(?TID, {?VALIDATORS, Vals}),
+    ok.
+
+
+get_validator_routing(Addr) ->
+    case sibyl_utils:address_data([Addr]) of
+        [] ->
+            {error, no_routing_data};
+        [#routing_address_pb{uri = URI}] ->
+            {ok, URI}
+    end.
+
 -spec add_commit_hooks() -> {ok, [reference() | atom()]}.
 add_commit_hooks() ->
     %% add any required commit hooks to the ledger
