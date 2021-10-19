@@ -201,7 +201,7 @@ validators(
     %% equal to NumVals
     Vals = sibyl_mgr:validators(),
     RandomVals = blockchain_utils:shuffle(Vals),
-    SelectedVals =  lists:sublist(RandomVals, min(NumVals, ?VALIDATOR_LIMIT)),
+    SelectedVals =  lists:sublist(RandomVals, max(1, min(NumVals, ?VALIDATOR_LIMIT))),
     lager:info("randomly selected validators: ~p", [SelectedVals]),
     EncodedVals = [#routing_address_pb{pub_key = Addr, uri = Routing} || {Addr, Routing} <- SelectedVals],
     Response = sibyl_utils:encode_gateway_resp_v1(
