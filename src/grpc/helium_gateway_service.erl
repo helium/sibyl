@@ -27,7 +27,8 @@
 %% general APIs
 -export([
     address_to_public_uri/2,
-    config/2
+    config/2,
+    validators/2
 ]).
 
 %% routing APIs
@@ -76,11 +77,24 @@ handle_info(_RPC, Msg, StreamState) ->
 %%%-------------------------------------------------------------------
 %% General RPC implementations
 %%%-------------------------------------------------------------------
+-spec address_to_public_uri(
+    ctx:ctx(),
+    gateway_pb:gateway_address_routing_data_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+address_to_public_uri(Ctx, Message) ->
+    helium_general_impl:address_to_public_uri(Ctx, Message).
+
 -spec config(
     ctx:ctx(),
     gateway_pb:gateway_config_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
 config(Ctx, Message) -> helium_general_impl:config(Ctx, Message).
+
+-spec validators(
+    ctx:ctx(),
+    gateway_pb:gateway_validators_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+validators(Ctx, Message) -> helium_general_impl:validators(Ctx, Message).
 
 %%%-------------------------------------------------------------------
 %% Routing RPC implementations
@@ -125,13 +139,6 @@ check_challenge_target(Ctx, Message) ->
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
 send_report(Ctx, Message) ->
     helium_poc_impl:send_report(Ctx, Message).
-
--spec address_to_public_uri(
-    ctx:ctx(),
-    gateway_pb:gateway_address_routing_data_req_v1_pb()
-) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
-address_to_public_uri(Ctx, Message) ->
-    helium_general_impl:address_to_public_uri(Ctx, Message).
 
 -spec poc_key_to_public_uri(
     ctx:ctx(),

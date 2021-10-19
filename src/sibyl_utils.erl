@@ -67,6 +67,8 @@ encode_gateway_resp_v1(#gateway_poc_region_params_resp_v1_pb{} = Msg, Height, Si
     do_encode_gateway_resp_v1({poc_region_params_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_config_resp_v1_pb{} = Msg, Height, SigFun) ->
     do_encode_gateway_resp_v1({config_resp, Msg}, Height, SigFun);
+encode_gateway_resp_v1(#gateway_validators_resp_v1_pb{} = Msg, Height, SigFun) ->
+    do_encode_gateway_resp_v1({validators_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_success_resp_pb{} = Msg, Height, SigFun) ->
     do_encode_gateway_resp_v1({success_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_error_resp_pb{} = Msg, Height, SigFun) ->

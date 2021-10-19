@@ -2,6 +2,8 @@
 
 -include("sibyl.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("blockchain/include/blockchain.hrl").
+
 
 -define(record_to_map(Rec, Ref),
     maps:from_list(lists:zip(record_info(fields, Rec), tl(tuple_to_list(Ref))))
@@ -14,7 +16,8 @@
 ]).
 
 -export([
-    config_test/1
+    config_test/1,
+    validators_test/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -34,7 +37,8 @@
 %%--------------------------------------------------------------------
 all() ->
     [
-        config_test
+        config_test,
+        validators_test
     ].
 
 %%--------------------------------------------------------------------
@@ -223,7 +227,126 @@ config_test(Config) ->
     ?assertEqual(<<"limit 5. keys presented 6">>, ErrorDetails3),
     ok.
 
+validators_test(Config)->
+    Connection = ?config(grpc_connection, Config),
+    [GatewayNode1 | _] = ?config(nodes, Config),
+    ct:pal("GatewayNode1: ~p", [GatewayNode1]),
+    ConsensusMembers = ?config(consensus_members, Config),
+    LocalChain = blockchain_worker:blockchain(),
+    LocalSwarm = blockchain_swarm:swarm(),
 
+    %% Get a gateway chain, swarm and pubkey_bin
+    GatewayNode1Chain = ct_rpc:call(GatewayNode1, blockchain_worker, blockchain, []),
+    GatewayNode1Swarm = ct_rpc:call(GatewayNode1, blockchain_swarm, swarm, []),
+    Self = self(),
+
+    %% get an owner for our validators
+    [{OwnerPubkeyBin, _OwnerPubkey, OwnerSigFun} | _] = ?config(consensus_members, Config),
+
+    %% make a bunch of validators and stake em
+    Keys = sibyl_ct_utils:generate_keys(10),
+    Txns = [ blockchain_txn_stake_validator_v1:new(
+        StakePubkeyBin,
+        OwnerPubkeyBin,
+        ?bones(10000),
+        ?bones(5)
+    ) || {StakePubkeyBin, {_StakePub, _StakePriv, _StakeSigFun}} <- Keys],
+    SignedTxns = [blockchain_txn_stake_validator_v1:sign(Txn, OwnerSigFun) || Txn <- Txns],
+
+    %% Add block with with txns
+    {ok, Block0} = sibyl_ct_utils:add_block(GatewayNode1, GatewayNode1Chain, ConsensusMembers, SignedTxns),
+    ct:pal("Block0: ~p", [Block0]),
+
+    %% Fake gossip block
+    ok = ct_rpc:call(GatewayNode1, blockchain_gossip_handler, add_block, [
+        Block0,
+        GatewayNode1Chain,
+        Self,
+        GatewayNode1Swarm
+    ]),
+
+    %% hardcode aliases for our validators
+    %% sibyl will not return routing data unless a validator/gw has a public address
+    %% so force an alias for each of our validators to a public IP
+    ValAliases = lists:foldl(
+        fun({PubKeyBin, {_, _, _}}, Acc) ->
+            P2PAddr = libp2p_crypto:pubkey_bin_to_p2p(PubKeyBin),
+            %% just give each val the same public ip...wont be used for anything
+            [{P2PAddr, "/ip4/52.8.80.146/tcp/2154" } | Acc]
+        end, [], Keys),
+    ct:pal("validator aliases ~p", [ValAliases]),
+    %% set the aliases env var on our local node
+    %% if no peerbook entries exist for our validators ( which they wont )
+    %% then the node aliases env var will be checked
+    application:set_env(libp2p, node_aliases, ValAliases),
+
+    %% Wait till the block is gossiped
+    %% and give the sibyl mgr time to refresh the cached list of validators
+    ok = sibyl_ct_utils:local_add_and_gossip_fake_blocks(
+        5,
+        ConsensusMembers,
+        LocalSwarm,
+        LocalChain,
+        Self
+    ),
+    ok = sibyl_ct_utils:wait_until_local_height(6),
+
+    %% test the validators RPC
+    {ok, #{
+        headers := Headers1,
+        result := #{
+            msg := {validators_resp, ResponseMsg1},
+            height := _ResponseHeight1,
+            signature := _ResponseSig1
+        } = Result1
+    }} = grpc_client:unary(
+        Connection,
+        #{quantity => 2},
+        'helium.gateway',
+        'validators',
+        gateway_client_pb,
+        []
+    ),
+    ct:pal("Response Headers: ~p", [Headers1]),
+    ct:pal("Response Body: ~p", [Result1]),
+    #{<<":status">> := HttpStatus1} = Headers1,
+    ?assertEqual(HttpStatus1, <<"200">>),
+    #{result := Validators1} = ResponseMsg1,
+    ?assertEqual(2, length(Validators1)),
+    #{pub_key := V1PubKeyBin, uri := V1URI} = lists:nth(1, Validators1),
+    #{pub_key := V2PubKeyBin, uri := V2URI} = lists:nth(2, Validators1),
+    %% all validators will have the same URI due to our aliases above
+    ?assertEqual(<<"http://52.8.80.146:10001/">>, V1URI),
+    ?assertEqual(<<"http://52.8.80.146:10001/">>, V2URI),
+    %% check the pub keys are from our list of validator keys
+    ?assert(lists:keymember(V1PubKeyBin, 1, Keys)),
+    ?assert(lists:keymember(V2PubKeyBin, 1, Keys)),
+
+
+    %% test the validators RPC max validators limit
+    {ok, #{
+        headers := Headers2,
+        result := #{
+            msg := {validators_resp, ResponseMsg2},
+            height := _ResponseHeight2,
+            signature := _ResponseSig2
+        } = Result2
+    }} = grpc_client:unary(
+        Connection,
+        #{quantity => 10},
+        'helium.gateway',
+        'validators',
+        gateway_client_pb,
+        []
+    ),
+    ct:pal("Response Headers: ~p", [Headers2]),
+    ct:pal("Response Body: ~p", [Result2]),
+    #{<<":status">> := HttpStatus2} = Headers2,
+    ?assertEqual(HttpStatus2, <<"200">>),
+    #{result := Validators2} = ResponseMsg2,
+    ?assertEqual(5, length(Validators2)),
+
+    ok.
 %
 %% ------------------------------------------------------------------
 %% Helper functions

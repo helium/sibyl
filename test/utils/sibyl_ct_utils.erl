@@ -3,6 +3,8 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("blockchain/include/blockchain.hrl").
+
 
 -export([
     create_block/2, create_block/3, create_block/4,
@@ -35,7 +37,8 @@
     create_oui_txn/4,
     setup_meck_txn_forwarding/2,
     get_consensus_members/2,
-    check_genesis_block/2
+    check_genesis_block/2,
+    generate_keys/1, generate_keys/2
 ]).
 
 create_block(ConsensusMembers, Txs) ->
@@ -491,7 +494,7 @@ cleanup_per_testcase(_TestCase, Config) ->
     ).
 
 initialize_nodes(Config) ->
-    Balance = 5000,
+    Balance = 50000000000000,
     NumConsensusMembers = ?config(num_consensus_members, Config),
     Nodes = ?config(nodes, Config),
 
@@ -506,18 +509,26 @@ initialize_nodes(Config) ->
     ),
 
     ConsensusAddrs = lists:sublist(lists:sort(Addrs), NumConsensusMembers),
-    DefaultVars = #{num_consensus_members => NumConsensusMembers},
+    DefaultVars = #{?num_consensus_members => NumConsensusMembers},
     ExtraVars = #{
-        sc_version => 2,
-        max_open_sc => 2,
-        min_expire_within => 10,
-        max_xor_filter_size => 1024 * 100,
-        max_xor_filter_num => 5,
-        max_subnet_size => 65536,
-        min_subnet_size => 8,
-        max_subnet_num => 20,
-        sc_grace_blocks => 5,
-        dc_payload_size => 24
+        ?sc_version => 2,
+        ?max_open_sc => 2,
+        ?min_expire_within => 10,
+        ?max_xor_filter_size => 1024 * 100,
+        ?max_xor_filter_num => 5,
+        ?max_subnet_size => 65536,
+        ?min_subnet_size => 8,
+        ?max_subnet_num => 20,
+        ?sc_grace_blocks => 5,
+        ?dc_payload_size => 24,
+        ?validator_version => 3,
+        ?validator_minimum_stake => ?bones(10000),
+        ?validator_liveness_grace_period => 10,
+        ?validator_liveness_interval => 5,
+        ?validator_key_check => true,
+        ?stake_withdrawal_cooldown => 10,
+        ?stake_withdrawal_max => 500
+
     },
 
     {InitialVars, _Config} = create_vars(maps:merge(DefaultVars, ExtraVars)),
@@ -843,6 +854,21 @@ local_add_and_gossip_fake_blocks(NumFakeBlocks, ConsensusMembers, Swarm, Chain, 
         end,
         lists:seq(1, NumFakeBlocks)
     ).
+
+generate_keys(N) ->
+    generate_keys(N, ecc_compact).
+
+generate_keys(N, Type) ->
+    lists:foldl(
+        fun(_, Acc) ->
+            #{public := PubKey, secret := PrivKey} = libp2p_crypto:generate_keys(Type),
+            SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+            [{libp2p_crypto:pubkey_to_bin(PubKey), {PubKey, PrivKey, SigFun}}|Acc]
+        end
+        ,[]
+        ,lists:seq(1, N)
+    ).
+
 %% ------------------------------------------------------------------
 %% Internal functions
 %% ------------------------------------------------------------------
