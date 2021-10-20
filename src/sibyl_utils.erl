@@ -23,6 +23,7 @@
     make_event/2,
     make_sc_topic/1,
     make_poc_topic/1,
+    make_config_update_topic/0,
     encode_gateway_resp_v1/3,
     to_routing_pb/1,
     address_data/1,
@@ -43,6 +44,9 @@ make_sc_topic(SCID) ->
 
 make_poc_topic(GatewayAddr) ->
     <<?EVENT_POC_NOTIFICATION/binary, GatewayAddr/binary>>.
+
+make_config_update_topic() ->
+    <<?EVENT_CONFIG_UPDATE_NOTIFICATION/binary>>.
 
 -spec encode_gateway_resp_v1(
     gateway_resp_type(),
@@ -69,6 +73,8 @@ encode_gateway_resp_v1(#gateway_config_resp_v1_pb{} = Msg, Height, SigFun) ->
     do_encode_gateway_resp_v1({config_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_validators_resp_v1_pb{} = Msg, Height, SigFun) ->
     do_encode_gateway_resp_v1({validators_resp, Msg}, Height, SigFun);
+encode_gateway_resp_v1(#gateway_config_update_streamed_resp_v1_pb{} = Msg, Height, SigFun) ->
+    do_encode_gateway_resp_v1({config_update_streamed_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_success_resp_pb{} = Msg, Height, SigFun) ->
     do_encode_gateway_resp_v1({success_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_error_resp_pb{} = Msg, Height, SigFun) ->

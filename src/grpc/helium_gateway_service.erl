@@ -165,4 +165,6 @@ stream({gateway_stream_req_v1_pb, {follow_req, Msg}}, StreamState) ->
 stream({gateway_stream_req_v1_pb, {routing_req, Msg}}, StreamState) ->
     helium_routing_impl:routing(Msg, StreamState);
 stream({gateway_stream_req_v1_pb, {poc_req, Msg}}, StreamState) ->
-    helium_poc_impl:pocs(Msg, StreamState).
+    helium_poc_impl:pocs(Msg, StreamState);
+stream({gateway_stream_req_v1_pb, {config_update_req, Msg}}, StreamState) ->
+    helium_general_impl:config_update(Msg, StreamState).

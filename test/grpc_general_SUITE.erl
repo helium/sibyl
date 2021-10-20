@@ -4,7 +4,6 @@
 -include_lib("blockchain/include/blockchain_vars.hrl").
 -include_lib("blockchain/include/blockchain.hrl").
 
-
 -define(record_to_map(Rec, Ref),
     maps:from_list(lists:zip(record_info(fields, Rec), tl(tuple_to_list(Ref))))
 ).
@@ -17,6 +16,7 @@
 
 -export([
     config_test/1,
+    config_update_test/1,
     validators_test/1
 ]).
 
@@ -38,6 +38,7 @@
 all() ->
     [
         config_test,
+        config_update_test,
         validators_test
     ].
 
@@ -149,7 +150,7 @@ config_test(Config) ->
     %% and confirm it returns correct chain val values for each
     Connection = ?config(grpc_connection, Config),
 
-    %% use the grpc APIs to confirm the state channel is active
+    %% use the grpc APIs to get some chain var config vales
     {ok, #{
         headers := Headers1,
         result := #{
@@ -171,7 +172,10 @@ config_test(Config) ->
     ?assertEqual(HttpStatus1, <<"200">>),
     #{result := KeyVals} = ResponseMsg1,
     ?assertEqual(
-        [#{key => <<"sc_grace_blocks">>, val => <<"5">>}, #{key => <<"dc_payload_size">>, val => <<"24">>}],
+        [
+            #{key => <<"sc_grace_blocks">>, val => <<"5">>},
+            #{key => <<"dc_payload_size">>, val => <<"24">>}
+        ],
         KeyVals
     ),
 
@@ -197,7 +201,10 @@ config_test(Config) ->
     ?assertEqual(HttpStatus2, <<"200">>),
     #{result := KeyVals2} = ResponseMsg2,
     ?assertEqual(
-        [#{key => <<"bad_key1">>, val => <<"non_existent">>}, #{key => <<"bad_key2">>, val => <<"non_existent">>}],
+        [
+            #{key => <<"bad_key1">>, val => <<"non_existent">>},
+            #{key => <<"bad_key2">>, val => <<"non_existent">>}
+        ],
         KeyVals2
     ),
 
@@ -227,7 +234,87 @@ config_test(Config) ->
     ?assertEqual(<<"limit 5. keys presented 6">>, ErrorDetails3),
     ok.
 
-validators_test(Config)->
+config_update_test(Config) ->
+    %% exercise the streaming API config_update
+    %% when initiated, the client will be streamed any updates to chain vars
+    %% the received payload will contain a list of each modified chainvar and its value
+    ConsensusMembers = ?config(consensus_members, Config),
+    [GatewayNode1 | _] = ?config(nodes, Config),
+    ct:pal("GatewayNode1: ~p", [GatewayNode1]),
+
+    Connection = ?config(grpc_connection, Config),
+    {Priv, _} = ?config(master_key, Config),
+
+    %% Get a gateway chain & swarm
+    GatewayNode1Chain = ct_rpc:call(GatewayNode1, blockchain_worker, blockchain, []),
+    GatewayNode1Swarm = ct_rpc:call(GatewayNode1, blockchain_swarm, swarm, []),
+    Self = self(),
+    LocalChain = blockchain_worker:blockchain(),
+    LocalSwarm = blockchain_swarm:swarm(),
+
+    {ok, Stream} = grpc_client:new_stream(
+        Connection,
+        'helium.gateway',
+        stream,
+        gateway_client_pb
+    ),
+
+    %% subscribe to config updates, msg payoad is empty
+
+    grpc_client:send(Stream, #{msg => {config_update_req, #{}}}),
+    %% confirm we got our grpc headers
+    {headers, Headers0} = grpc_client:rcv(Stream, 5000),
+    ct:pal("Response Headers0: ~p", [Headers0]),
+    #{<<":status">> := Headers0HttpStatus} = Headers0,
+    ?assertEqual(Headers0HttpStatus, <<"200">>),
+
+    %% update a chain var value and confirm we get its updated value streamed
+    Vars = #{sc_grace_blocks => 8, max_open_sc => 4},
+    VarTxn = blockchain_txn_vars_v1:new(Vars, 3),
+    Proof = blockchain_txn_vars_v1:create_proof(Priv, VarTxn),
+    VarTxn1 = blockchain_txn_vars_v1:proof(VarTxn, Proof),
+
+    %% Add block with with txns
+    {ok, Block0} = sibyl_ct_utils:add_block(GatewayNode1, GatewayNode1Chain, ConsensusMembers, [
+        VarTxn1
+    ]),
+    ct:pal("Block0: ~p", [Block0]),
+
+    %% Fake gossip block
+    ok = ct_rpc:call(GatewayNode1, blockchain_gossip_handler, add_block, [
+        Block0,
+        GatewayNode1Chain,
+        Self,
+        GatewayNode1Swarm
+    ]),
+
+    %% Wait till the block is gossiped
+    ok = sibyl_ct_utils:local_add_and_gossip_fake_blocks(
+        2,
+        ConsensusMembers,
+        LocalSwarm,
+        LocalChain,
+        Self
+    ),
+    ok = sibyl_ct_utils:wait_until_local_height(3),
+
+    %% confirm we receive a config update with the two new chain vars
+    {data, #{height := _Height0, msg := {config_update_streamed_resp, #{vars := ConfigUpdateMsg0}}}} =
+        Data0 = grpc_client:rcv(Stream, 5000),
+    ct:pal("Response Data0: ~p", [Data0]),
+    ?assertEqual(
+        [
+            #{key => <<"max_open_sc">>, val => <<"4">>},
+            #{key => <<"sc_grace_blocks">>, val => <<"8">>}
+        ],
+        ConfigUpdateMsg0
+    ),
+    ok.
+
+validators_test(Config) ->
+    %% exercise the validators api
+    %% client can request to be returned data on one or more random validators
+    %% the pubkey and the URI will be returned for each validator
     Connection = ?config(grpc_connection, Config),
     [GatewayNode1 | _] = ?config(nodes, Config),
     ct:pal("GatewayNode1: ~p", [GatewayNode1]),
@@ -245,16 +332,24 @@ validators_test(Config)->
 
     %% make a bunch of validators and stake em
     Keys = sibyl_ct_utils:generate_keys(10),
-    Txns = [ blockchain_txn_stake_validator_v1:new(
-        StakePubkeyBin,
-        OwnerPubkeyBin,
-        ?bones(10000),
-        ?bones(5)
-    ) || {StakePubkeyBin, {_StakePub, _StakePriv, _StakeSigFun}} <- Keys],
+    Txns = [
+        blockchain_txn_stake_validator_v1:new(
+            StakePubkeyBin,
+            OwnerPubkeyBin,
+            ?bones(10000),
+            ?bones(5)
+        )
+        || {StakePubkeyBin, {_StakePub, _StakePriv, _StakeSigFun}} <- Keys
+    ],
     SignedTxns = [blockchain_txn_stake_validator_v1:sign(Txn, OwnerSigFun) || Txn <- Txns],
 
     %% Add block with with txns
-    {ok, Block0} = sibyl_ct_utils:add_block(GatewayNode1, GatewayNode1Chain, ConsensusMembers, SignedTxns),
+    {ok, Block0} = sibyl_ct_utils:add_block(
+        GatewayNode1,
+        GatewayNode1Chain,
+        ConsensusMembers,
+        SignedTxns
+    ),
     ct:pal("Block0: ~p", [Block0]),
 
     %% Fake gossip block
@@ -272,8 +367,11 @@ validators_test(Config)->
         fun({PubKeyBin, {_, _, _}}, Acc) ->
             P2PAddr = libp2p_crypto:pubkey_bin_to_p2p(PubKeyBin),
             %% just give each val the same public ip...wont be used for anything
-            [{P2PAddr, "/ip4/52.8.80.146/tcp/2154" } | Acc]
-        end, [], Keys),
+            [{P2PAddr, "/ip4/52.8.80.146/tcp/2154"} | Acc]
+        end,
+        [],
+        Keys
+    ),
     ct:pal("validator aliases ~p", [ValAliases]),
     %% set the aliases env var on our local node
     %% if no peerbook entries exist for our validators ( which they wont )
@@ -321,7 +419,6 @@ validators_test(Config)->
     %% check the pub keys are from our list of validator keys
     ?assert(lists:keymember(V1PubKeyBin, 1, Keys)),
     ?assert(lists:keymember(V2PubKeyBin, 1, Keys)),
-
 
     %% test the validators RPC max validators limit
     {ok, #{

@@ -236,11 +236,39 @@ process_add_block_event({add_block, BlockHash, _Sync, Ledger}, _State) ->
                     ok = update_validator_cache(Ledger);
                 false ->
                     ok
-            end;
+            end,
+            %% check if there are any chain var txns in the block
+            %% if so send a notification to subscribed clients
+            %% containing the updates vars
+            %% TODO: replace the txn monitoring with the chain var hooks
+            %%       when that gets integrated
+            ok = check_for_chain_var_updates(Block, BlockHeight);
         _ ->
             %% err what?
             ok
     end.
+
+check_for_chain_var_updates(Block, BlockHeight) ->
+    Txns = blockchain_block:transactions(Block),
+    FilteredTxns = lists:filter(fun(Txn)-> blockchain_txn:type(Txn) == blockchain_txn_vars_v1 end, Txns),
+    UpdatedVarsPB =
+        lists:foldl(
+            fun(VarTxn, Acc) ->
+                Vars = maps:to_list(blockchain_txn_vars_v1:decoded_vars(VarTxn)),
+                EncodedVars = [#key_val_v1_pb{key = sibyl_utils:ensure(binary, K), val = sibyl_utils:ensure(binary, V)} || {K, V} <- Vars],
+                Acc ++ EncodedVars
+            end, [], FilteredTxns),
+    %% publish an event with the updated vars
+    %% all subscribed clients will get the same msg payload
+    Notification = sibyl_utils:encode_gateway_resp_v1(
+        #gateway_config_update_streamed_resp_v1_pb{vars = UpdatedVarsPB},
+        BlockHeight,
+        sibyl_mgr:sigfun()
+    ),
+    Topic = sibyl_utils:make_config_update_topic(),
+    sibyl_bus:pub(Topic, {config_update_notify, Notification}),
+    lager:info("notifying clients of chain var updates: ~p",[UpdatedVarsPB]),
+    ok.
 
 -spec update_validator_cache(Ledger :: blockchain_ledger_v1:ledger()) -> ok.
 update_validator_cache(Ledger) ->

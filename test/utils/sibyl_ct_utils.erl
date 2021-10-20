@@ -5,7 +5,6 @@
 -include_lib("blockchain/include/blockchain_vars.hrl").
 -include_lib("blockchain/include/blockchain.hrl").
 
-
 -export([
     create_block/2, create_block/3, create_block/4,
     pmap/2,
@@ -528,10 +527,9 @@ initialize_nodes(Config) ->
         ?validator_key_check => true,
         ?stake_withdrawal_cooldown => 10,
         ?stake_withdrawal_max => 500
-
     },
 
-    {InitialVars, _Config} = create_vars(maps:merge(DefaultVars, ExtraVars)),
+    {InitialTxns, MasterKeyConfig} = create_vars(maps:merge(DefaultVars, ExtraVars)),
 
     % Create genesis block
     GenPaymentTxs = [blockchain_txn_coinbase_v1:new(Addr, Balance) || Addr <- Addrs],
@@ -549,7 +547,7 @@ initialize_nodes(Config) ->
         || Addr <- Addrs
     ],
 
-    Txs = InitialVars ++ GenPaymentTxs ++ GenDCsTxs ++ GenGwTxns ++ [GenConsensusGroupTx],
+    Txs = InitialTxns ++ GenPaymentTxs ++ GenDCsTxs ++ GenGwTxns ++ [GenConsensusGroupTx],
     GenesisBlock = blockchain_block:new_genesis_block(Txs),
 
     %% tell each node to integrate the genesis block
@@ -582,7 +580,12 @@ initialize_nodes(Config) ->
 
     ok = check_genesis_block(Config, GenesisBlock),
     ConsensusMembers = get_consensus_members(Config, ConsensusAddrs),
-    [{consensus_members, ConsensusMembers}, {genesis_block, GenesisBlock} | Config].
+    [
+        MasterKeyConfig,
+        {consensus_members, ConsensusMembers},
+        {genesis_block, GenesisBlock}
+        | Config
+    ].
 
 create_vars() ->
     create_vars(#{}).
@@ -863,10 +866,10 @@ generate_keys(N, Type) ->
         fun(_, Acc) ->
             #{public := PubKey, secret := PrivKey} = libp2p_crypto:generate_keys(Type),
             SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
-            [{libp2p_crypto:pubkey_to_bin(PubKey), {PubKey, PrivKey, SigFun}}|Acc]
-        end
-        ,[]
-        ,lists:seq(1, N)
+            [{libp2p_crypto:pubkey_to_bin(PubKey), {PubKey, PrivKey, SigFun}} | Acc]
+        end,
+        [],
+        lists:seq(1, N)
     ).
 
 %% ------------------------------------------------------------------
