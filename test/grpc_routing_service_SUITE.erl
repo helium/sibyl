@@ -174,6 +174,7 @@ init_per_testcase(TestCase, Config) ->
 %% TEST CASE TEARDOWN
 %%--------------------------------------------------------------------
 end_per_testcase(TestCase, Config) ->
+    blockchain_utils:teardown_var_cache(),
     meck:unload(blockchain_txn_oui_v1),
     meck:unload(blockchain_ledger_v1),
     SibylSup = ?config(sibyl_sup, Config),
