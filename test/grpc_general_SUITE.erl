@@ -202,8 +202,8 @@ config_test(Config) ->
     #{result := KeyVals2} = ResponseMsg2,
     ?assertEqual(
         [
-            #{key => <<"bad_key1">>, val => <<"non_existent">>},
-            #{key => <<"bad_key2">>, val => <<"non_existent">>}
+            #{key => <<"bad_key1">>, val => <<>>},
+            #{key => <<"bad_key2">>, val => <<>>}
         ],
         KeyVals2
     ),
@@ -260,8 +260,7 @@ config_update_test(Config) ->
     ),
 
     %% subscribe to config updates, msg payoad is empty
-
-    grpc_client:send(Stream, #{msg => {config_update_req, #{}}}),
+    grpc_client:send(Stream, #{}),
     %% confirm we got our grpc headers
     {headers, Headers0} = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Headers0: ~p", [Headers0]),

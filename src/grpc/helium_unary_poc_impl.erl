@@ -214,27 +214,19 @@ region_params(
 ) ->
     lager:info("executing RPC region_params with msg ~p", [Request]),
     Chain = sibyl_mgr:blockchain(),
-    lager:info("*** region params point 1", []),
     Ledger = blockchain:ledger(Chain),
-    lager:info("*** region params point 2", []),
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
-    lager:info("*** region params point 3", []),
     PubKey = libp2p_crypto:bin_to_pubkey(Addr),
-    lager:info("*** region params point 4", []),
     BaseReq = Request#gateway_poc_region_params_req_v1_pb{signature = <<>>},
-    lager:info("*** region params point 5", []),
     EncodedReq = gateway_pb:encode_msg(BaseReq),
-    lager:info("*** region params point 6", []),
     RespPB =
         case libp2p_crypto:verify(EncodedReq, Signature, PubKey) of
             false ->
-                lager:info("*** region params point 7", []),
                 #gateway_error_resp_pb{
                     error = <<"bad_signature">>,
                     details = Signature
                 };
             true ->
-                lager:info("*** region params point 8", []),
                 case blockchain_ledger_v1:find_gateway_location(Addr, Ledger) of
                     {ok, Location} ->
                         case blockchain_region_v1:h3_to_region(Location, Ledger) of
@@ -279,14 +271,12 @@ region_params(
                         }
                 end
         end,
-    lager:info("*** region params point 9", []),
     lager:info("region RespPB: ~p", [RespPB]),
     Resp = sibyl_utils:encode_gateway_resp_v1(
         RespPB,
         CurHeight,
         sibyl_mgr:sigfun()
     ),
-    lager:info("*** region params point 10", []),
     lager:info("region Resp: ~p", [Resp]),
     {ok, Resp, Ctx}.
 

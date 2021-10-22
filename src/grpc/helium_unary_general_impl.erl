@@ -144,13 +144,13 @@ config(
                                             ];
                                         {error, _} ->
                                             [
-                                                #key_val_v1_pb{key = Key, val = <<"non_existent">>}
+                                                #key_val_v1_pb{key = Key, val = undefined}
                                                 | Acc
                                             ]
                                     end
                                 catch
                                     _:_ ->
-                                        [#key_val_v1_pb{key = Key, val = <<"non_existent">>} | Acc]
+                                        [#key_val_v1_pb{key = Key, val = undefined} | Acc]
                                 end
                             end,
                             [],
