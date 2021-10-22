@@ -152,7 +152,7 @@ init_per_testcase(TestCase, Config) ->
     {ok, Stream} = grpc_client:new_stream(
         Connection,
         'helium.gateway',
-        stream,
+        stream_routing,
         gateway_client_pb
     ),
 

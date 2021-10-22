@@ -1,4 +1,4 @@
--module(helium_state_channels_impl).
+-module(helium_stream_sc_follow_impl).
 
 -include("../../include/sibyl.hrl").
 -include("../grpc/autogen/server/gateway_pb.hrl").
@@ -38,32 +38,14 @@
 }.
 -export_type([handler_state/0]).
 
-%%-record(handler_state, {
-%%    %% module of the handler
-%%    mod = undefined :: atom(),
-%%    %% tracks which SC we are following
-%%    sc_follows = #{} :: #{binary() => follow()},
-%%    %% tracks which SCs we have send a closed msg for
-%%    sc_closes_sent = [] :: list(),
-%%    %% tracks which SCs we have send a closing msg for
-%%    sc_closings_sent = [] :: list(),
-%%    %% tracks which SCs we have send a closable msg for
-%%    sc_closables_sent = [] :: list(),
-%%    %% tracks which SCs we have send a dispute msg for
-%%    sc_disputes_sent = [] :: list()
-%%}).
-
 -export([
     init/2,
-    is_active_sc/2,
-    is_overpaid_sc/2,
-    close_sc/2,
     follow_sc/2,
     handle_info/2
 ]).
 
 %% ------------------------------------------------------------------
-%% helium_gateway_state_channels_bhvr callbacks
+%% helium_gateway_bhvr 'stream_sc_follow' callbacks
 %% ------------------------------------------------------------------
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
 init(_RPC, StreamState) ->
@@ -83,41 +65,15 @@ init(_RPC, StreamState) ->
     ),
     NewStreamState.
 
--spec is_active_sc(
-    ctx:ctx(),
-    gateway_pb:gateway_sc_is_active_req_v1_pb()
-) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
-is_active_sc(Ctx, #gateway_sc_is_active_req_v1_pb{} = Message) ->
-    Chain = sibyl_mgr:blockchain(),
-    is_active_sc(Chain, Ctx, Message).
-
--spec is_overpaid_sc(
-    ctx:ctx(),
-    gateway_pb:gateway_sc_is_overpaid_req_v1_pb()
-) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
-is_overpaid_sc(Ctx, #gateway_sc_is_overpaid_req_v1_pb{} = Message) ->
-    Chain = sibyl_mgr:blockchain(),
-    is_overpaid_sc(Chain, Ctx, Message).
-
--spec close_sc(
-    ctx:ctx(),
-    gateway_pb:gateway_sc_close_req_v1_pb()
-) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()}.
-close_sc(Ctx, #gateway_sc_close_req_v1_pb{} = Message) ->
-    Chain = sibyl_mgr:blockchain(),
-    close_sc(Chain, Ctx, Message).
-
 -spec follow_sc(
     gateway_pb:gateway_sc_follow_req_v1(),
     grpcbox_stream:t()
 ) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 follow_sc(#gateway_sc_follow_req_v1_pb{sc_id = SCID, sc_owner = SCOwner} = Msg, StreamState) ->
     Chain = sibyl_mgr:blockchain(),
-    CurHandlerState = grpcbox_stream:stream_handler_state(StreamState),
-    StreamState0 = maybe_init_stream_state(follow_sc, CurHandlerState, StreamState),
-    #{sc_follows := SCFollows} = grpcbox_stream:stream_handler_state(StreamState0),
+    #{sc_follows := SCFollows} = grpcbox_stream:stream_handler_state(StreamState),
     Key = blockchain_ledger_v1:state_channel_key(SCID, SCOwner),
-    follow_sc(Chain, maps:is_key(Key, SCFollows), Msg, StreamState0).
+    follow_sc(Chain, maps:is_key(Key, SCFollows), Msg, StreamState).
 
 -spec handle_info(any(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info({blockchain_event, {add_block, BlockHash, _Sync, _Ledger} = _Event}, StreamState) ->
@@ -156,85 +112,6 @@ handle_info(
 %% ------------------------------------------------------------------
 %% callback breakout functions
 %% ------------------------------------------------------------------
--spec is_active_sc(
-    undefined | blockchain:blockchain(),
-    ctx:ctx(),
-    gateway_pb:gateway_sc_is_active_req_v1_pb()
-) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
-is_active_sc(undefined = _Chain, _Ctx, #gateway_sc_is_active_req_v1_pb{} = _Msg) ->
-    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
-    {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
-is_active_sc(
-    Chain,
-    Ctx,
-    #gateway_sc_is_active_req_v1_pb{sc_id = SCID, sc_owner = SCOwner} = _Message
-) ->
-    lager:info("executing RPC is_active with msg ~p", [_Message]),
-    {ok, CurHeight} = get_height(),
-    Response0 = #gateway_sc_is_active_resp_v1_pb{
-        active = check_is_active_sc(SCID, SCOwner, Chain),
-        sc_id = SCID,
-        sc_owner = SCOwner
-    },
-    Response1 = sibyl_utils:encode_gateway_resp_v1(
-        Response0,
-        CurHeight,
-        sibyl_mgr:sigfun()
-    ),
-    {ok, Response1, Ctx}.
-
--spec is_overpaid_sc(
-    undefined | blockchain:blockchain(),
-    ctx:ctx(),
-    gateway_pb:gateway_sc_is_overpaid_req_v1_pb()
-) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
-is_overpaid_sc(undefined = _Chain, _Ctx, #gateway_sc_is_overpaid_req_v1_pb{} = _Msg) ->
-    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
-    {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
-is_overpaid_sc(
-    Chain,
-    Ctx,
-    #gateway_sc_is_overpaid_req_v1_pb{sc_id = SCID, sc_owner = SCOwner, total_dcs = TotalDCs} =
-        _Message
-) ->
-    lager:info("executing RPC is_overpaid with msg ~p", [_Message]),
-    {ok, CurHeight} = get_height(),
-    Response0 = #gateway_sc_is_overpaid_resp_v1_pb{
-        overpaid = check_is_overpaid_sc(SCID, SCOwner, TotalDCs, Chain),
-        sc_id = SCID,
-        sc_owner = SCOwner
-    },
-    Response1 = sibyl_utils:encode_gateway_resp_v1(
-        Response0,
-        CurHeight,
-        sibyl_mgr:sigfun()
-    ),
-    {ok, Response1, Ctx}.
-
--spec close_sc(
-    blockchain:blockchain(),
-    ctx:ctx(),
-    gateway_pb:gateway_sc_close_req_v1_pb()
-) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()}.
-close_sc(undefined = _Chain, _Ctx, #gateway_sc_close_req_v1_pb{} = _Msg) ->
-    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
-    {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
-close_sc(_Chain, Ctx, #gateway_sc_close_req_v1_pb{close_txn = CloseTxn} = _Message) ->
-    lager:info("executing RPC close with msg ~p", [_Message]),
-    %% TODO, maybe validate the SC exists ? but then if its a v1 it could already have been
-    %% deleted from the ledger.....
-    SC = blockchain_txn_state_channel_close_v1:state_channel(CloseTxn),
-    SCID = blockchain_state_channel_v1:id(SC),
-    ok = blockchain_worker:submit_txn(CloseTxn),
-    {ok, CurHeight} = get_height(),
-    Response0 = #gateway_sc_close_resp_v1_pb{sc_id = SCID, response = <<"ok">>},
-    Response1 = sibyl_utils:encode_gateway_resp_v1(
-        Response0,
-        CurHeight,
-        sibyl_mgr:sigfun()
-    ),
-    {ok, Response1, Ctx}.
-
 -spec follow_sc(
     blockchain:blockchain(),
     boolean(),
@@ -661,33 +538,6 @@ send_follow_msg(SCID, SCOwner, {SCNewState, SendList}, Height, _SCOldState, Stre
     NewStreamState = grpcbox_stream:send(false, Msg1, StreamState),
     {true, NewStreamState, [SCID | SendList]}.
 
--spec check_is_active_sc(
-    SCID :: binary(),
-    SCOwner :: libp2p_crypto:pubkey_bin(),
-    Chain :: blockchain:blockchain()
-) -> true | false.
-check_is_active_sc(SCID, SCOwner, Chain) ->
-    Ledger = blockchain:ledger(Chain),
-    case get_ledger_state_channel(SCID, SCOwner, Ledger) of
-        {ok, _Mod, _SC} -> true;
-        _ -> false
-    end.
-
--spec check_is_overpaid_sc(
-    SCID :: binary(),
-    SCOwner :: libp2p_crypto:pubkey_bin(),
-    TotalDCs :: non_neg_integer(),
-    Chain :: blockchain:blockchain()
-) -> true | false.
-check_is_overpaid_sc(SCID, SCOwner, TotalDCs, Chain) ->
-    Ledger = blockchain:ledger(Chain),
-    case get_ledger_state_channel(SCID, SCOwner, Ledger) of
-        {ok, blockchain_ledger_state_channel_v2, SC} ->
-            blockchain_ledger_state_channel_v2:original(SC) < TotalDCs;
-        _ ->
-            false
-    end.
-
 -spec get_ledger_state_channel(binary(), binary(), blockchain_ledger_v1:ledger()) ->
     {ok, sc_ledger(), blockchain_state_channel_v1:state_channel()} | {error, any()}.
 get_ledger_state_channel(SCID, Owner, Ledger) ->
@@ -716,12 +566,3 @@ deserialize_sc(SC = <<1, _/binary>>) ->
     {v1, blockchain_ledger_state_channel_v1:deserialize(SC)};
 deserialize_sc(SC = <<2, _/binary>>) ->
     {v2, blockchain_ledger_state_channel_v2:deserialize(SC)}.
-
--spec maybe_init_stream_state(atom(), undefined | handler_state(), grpcbox_stream:t()) ->
-    grpcbox_stream:t().
-maybe_init_stream_state(RPC, undefined, StreamState) ->
-    lager:debug("handler init, stream state ~p", [StreamState]),
-    NewStreamState = init(RPC, StreamState),
-    NewStreamState;
-maybe_init_stream_state(_RPC, _HandlerState, StreamState) ->
-    StreamState.

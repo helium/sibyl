@@ -1,11 +1,11 @@
--module(helium_routing_impl).
+-module(helium_stream_routing_impl).
 
 -include("../../include/sibyl.hrl").
 -include("autogen/server/gateway_pb.hrl").
 
 -type handler_state() :: #{
     mod => atom(),
-    initialized => boolean()
+    streaming_initialized => boolean()
 }.
 -export_type([handler_state/0]).
 
@@ -15,6 +15,9 @@
     routing/2
 ]).
 
+%% ------------------------------------------------------------------
+%% helium_gateway_bhvr 'stream_routing' callbacks
+%% ------------------------------------------------------------------
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
 init(_RPC, StreamState) ->
     lager:info("handler init, stream state ~p", [StreamState]),
@@ -22,7 +25,7 @@ init(_RPC, StreamState) ->
     ok = blockchain_event:add_handler(self()),
     NewStreamState = grpcbox_stream:stream_handler_state(
         StreamState,
-        #{initialized => false, mod => ?MODULE}
+        #{streaming_initialized => false, mod => ?MODULE}
     ),
     NewStreamState.
 
@@ -30,10 +33,10 @@ init(_RPC, StreamState) ->
     {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 routing(#gateway_routing_req_v1_pb{height = ClientHeight} = Msg, StreamState) ->
     lager:debug("RPC routing called with height ~p", [ClientHeight]),
-    HandlerState = grpcbox_stream:stream_handler_state(StreamState),
-    StreamState0 = maybe_init_stream_state(routing, HandlerState, StreamState),
-    #{initialized := Initialized} = grpcbox_stream:stream_handler_state(StreamState0),
-    routing(Initialized, sibyl_mgr:blockchain(), Msg, StreamState0).
+    #{streaming_initialized := StreamingInitialized} = grpcbox_stream:stream_handler_state(
+        StreamState
+    ),
+    routing(StreamingInitialized, sibyl_mgr:blockchain(), Msg, StreamState).
 
 -spec routing(
     boolean(),
@@ -41,17 +44,22 @@ routing(#gateway_routing_req_v1_pb{height = ClientHeight} = Msg, StreamState) ->
     gateway_pb:gateway_routing_req_v1_pb(),
     grpcbox_stream:t()
 ) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
-routing(_Initialized, undefined = _Chain, #gateway_routing_req_v1_pb{} = _Msg, _StreamState) ->
+routing(
+    _StreamingInitialized,
+    undefined = _Chain,
+    #gateway_routing_req_v1_pb{} = _Msg,
+    _StreamState
+) ->
     % if chain not up we have no way to return routing data so just return a 14/503
     lager:debug("chain not ready, returning error response"),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 routing(
-    false = _Initialized,
+    false = _StreamingInitialized,
     _Chain,
     #gateway_routing_req_v1_pb{height = ClientHeight} = _Msg,
     StreamState
 ) ->
-    %% not previously initialized, this must be the first msg from the client
+    %% not previously streaming_initialized, this must be the first msg from the client
     %% we will have some setup to do including subscribing to our required events
     lager:debug("handling first msg from client ~p", [_Msg]),
     ok = sibyl_bus:sub(?EVENT_ROUTING_UPDATES_END, self()),
@@ -60,12 +68,12 @@ routing(
     NewStreamState0 = grpcbox_stream:stream_handler_state(
         NewStreamState,
         HandlerState#{
-            initialized => true
+            streaming_initialized => true
         }
     ),
     {ok, NewStreamState0};
-routing(true = _Initialized, _Chain, #gateway_routing_req_v1_pb{} = _Msg, StreamState) ->
-    %% we previously initialized, this must be a subsequent incoming msg from the client - ignore
+routing(true = _StreamingInitialized, _Chain, #gateway_routing_req_v1_pb{} = _Msg, StreamState) ->
+    %% we previously streaming_initialized, this must be a subsequent incoming msg from the client - ignore
     lager:debug("ignoring subsequent msg from client ~p", [_Msg]),
     {ok, StreamState}.
 
@@ -87,7 +95,6 @@ handle_info(
 %% ------------------------------------------------------------------
 %% Internal functions
 %% ------------------------------------------------------------------
-
 -spec handle_event(sibyl_mgr:event(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_event(
     {event, ?EVENT_ROUTING_UPDATES_END, ChangedKeys} = _Event,
@@ -180,12 +187,3 @@ is_data_modified(ClientLastHeight, LastModifiedHeight) when
     ClientLastHeight < LastModifiedHeight;
 is_data_modified(_ClientLastHeight, _LastModifiedHeight) ->
     true.
-
--spec maybe_init_stream_state(atom(), undefined | handler_state(), grpcbox_stream:t()) ->
-    grpcbox_stream:t().
-maybe_init_stream_state(RPC, undefined, StreamState) ->
-    lager:debug("handler init, stream state ~p", [StreamState]),
-    NewStreamState = init(RPC, StreamState),
-    NewStreamState;
-maybe_init_stream_state(_RPC, _HandlerState, StreamState) ->
-    StreamState.

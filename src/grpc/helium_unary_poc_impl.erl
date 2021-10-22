@@ -1,40 +1,18 @@
--module(helium_poc_impl).
+-module(helium_unary_poc_impl).
 
 -include("../../include/sibyl.hrl").
 -include("../grpc/autogen/server/gateway_pb.hrl").
 
--type handler_state() :: #{
-    mod => atom(),
-    streaming_initialized => boolean()
-}.
--export_type([handler_state/0]).
-
 -export([
-    init/2,
-    handle_info/2
-]).
-
--export([
-    pocs/2,
     check_challenge_target/2,
     send_report/2,
-    address_to_public_uri/2,
     poc_key_to_public_uri/2,
     region_params/2
 ]).
 
 %% ------------------------------------------------------------------
-%% helium_gateway_poc_bhvr callbacks
+%% helium_gateway_bhvr POC related unary callbacks
 %% ------------------------------------------------------------------
--spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
-init(_RPC, StreamState) ->
-    lager:info("handler init, stream state ~p", [StreamState]),
-    NewStreamState = grpcbox_stream:stream_handler_state(
-        StreamState,
-        #{streaming_initialized => false, mod => ?MODULE}
-    ),
-    NewStreamState.
-
 -spec check_challenge_target(
     ctx:ctx(),
     gateway_pb:gateway_poc_check_challenge_target_req_v1_pb()
@@ -51,14 +29,6 @@ send_report(Ctx, #gateway_poc_report_req_v1_pb{} = Message) ->
     Chain = sibyl_mgr:blockchain(),
     send_report(Chain, Ctx, Message).
 
--spec address_to_public_uri(
-    ctx:ctx(),
-    gateway_pb:gateway_address_routing_data_req_v1_pb()
-) -> {ok, gateway_pb:gateway_resp_v1(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
-address_to_public_uri(Ctx, #gateway_address_routing_data_req_v1_pb{} = Message) ->
-    Chain = sibyl_mgr:blockchain(),
-    address_to_public_uri(Chain, Ctx, Message).
-
 -spec poc_key_to_public_uri(
     ctx:ctx(),
     gateway_pb:gateway_poc_key_routing_data_req_v1_pb()
@@ -74,48 +44,9 @@ poc_key_to_public_uri(Ctx, #gateway_poc_key_routing_data_req_v1_pb{} = Message) 
 region_params(Ctx, #gateway_poc_region_params_req_v1_pb{} = Message) ->
     Chain = sibyl_mgr:blockchain(),
     region_params(Chain, Ctx, Message).
-
--spec pocs(
-    gateway_pb:gateway_poc_req_v1(),
-    grpcbox_stream:t()
-) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
-pocs(#gateway_poc_req_v1_pb{} = Msg, StreamState) ->
-    Chain = sibyl_mgr:blockchain(),
-    HandlerState = grpcbox_stream:stream_handler_state(StreamState),
-    StreamState0 = maybe_init_stream_state(pocs, HandlerState, StreamState),
-    #{streaming_initialized := IsAlreadyStreamingPOCs} = grpcbox_stream:stream_handler_state(
-        StreamState0
-    ),
-    pocs(Chain, IsAlreadyStreamingPOCs, Msg, StreamState0).
-
--spec handle_info(sibyl_mgr:event() | any(), grpcbox_stream:t()) -> grpcbox_stream:t().
-handle_info(
-    {event, _EventTopic, _Payload} = Event,
-    StreamState
-) ->
-    lager:debug("received event ~p", [Event]),
-    NewStreamState = handle_event(Event, StreamState),
-    NewStreamState;
-handle_info(
-    {poc_notify, Msg},
-    StreamState
-) ->
-    lager:info("received poc msg, sending to client ~p", [Msg]),
-    %% received a poc notification event, we simply have to forward this unmodified to the client
-    %% the payload is fully formed and encoded
-    NewStreamState = grpcbox_stream:send(false, Msg, StreamState),
-    NewStreamState;
-handle_info(
-    _Msg,
-    StreamState
-) ->
-    lager:warning("unhandled info msg: ~p", [_Msg]),
-    StreamState.
-
 %% ------------------------------------------------------------------
 %% callback breakout functions
 %% ------------------------------------------------------------------
-
 -spec check_challenge_target(
     undefined | blockchain:blockchain(),
     ctx:ctx(),
@@ -222,43 +153,6 @@ send_report(
     ),
     {ok, Resp, Ctx}.
 
--spec address_to_public_uri(
-    undefined | blockchain:blockchain(),
-    ctx:ctx(),
-    gateway_pb:gateway_address_routing_data_req_v1_pb()
-) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
-address_to_public_uri(undefined = _Chain, _Ctx, #gateway_address_routing_data_req_v1_pb{} = _Msg) ->
-    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
-    {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
-address_to_public_uri(
-    Chain,
-    Ctx,
-    #gateway_address_routing_data_req_v1_pb{address = Address} = _Message
-) ->
-    lager:info("executing RPC address_to_public_uri with msg ~p", [_Message]),
-    Chain = sibyl_mgr:blockchain(),
-    Ledger = blockchain:ledger(Chain),
-    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
-    RespPB =
-        case sibyl_utils:address_data([Address]) of
-            [] ->
-                #gateway_error_resp_pb{
-                    error = <<"no_public_route_for_address">>,
-                    details = Address
-                };
-            [RoutingAddress] ->
-                #gateway_public_routing_data_resp_v1_pb{
-                    address = Address,
-                    public_uri = RoutingAddress
-                }
-        end,
-    Resp = sibyl_utils:encode_gateway_resp_v1(
-        RespPB,
-        CurHeight,
-        sibyl_mgr:sigfun()
-    ),
-    {ok, Resp, Ctx}.
-
 -spec poc_key_to_public_uri(
     undefined | blockchain:blockchain(),
     ctx:ctx(),
@@ -320,19 +214,27 @@ region_params(
 ) ->
     lager:info("executing RPC region_params with msg ~p", [Request]),
     Chain = sibyl_mgr:blockchain(),
+    lager:info("*** region params point 1", []),
     Ledger = blockchain:ledger(Chain),
+    lager:info("*** region params point 2", []),
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
+    lager:info("*** region params point 3", []),
     PubKey = libp2p_crypto:bin_to_pubkey(Addr),
+    lager:info("*** region params point 4", []),
     BaseReq = Request#gateway_poc_region_params_req_v1_pb{signature = <<>>},
+    lager:info("*** region params point 5", []),
     EncodedReq = gateway_pb:encode_msg(BaseReq),
+    lager:info("*** region params point 6", []),
     RespPB =
         case libp2p_crypto:verify(EncodedReq, Signature, PubKey) of
             false ->
+                lager:info("*** region params point 7", []),
                 #gateway_error_resp_pb{
                     error = <<"bad_signature">>,
                     details = Signature
                 };
             true ->
+                lager:info("*** region params point 8", []),
                 case blockchain_ledger_v1:find_gateway_location(Addr, Ledger) of
                     {ok, Location} ->
                         case blockchain_region_v1:h3_to_region(Location, Ledger) of
@@ -377,90 +279,20 @@ region_params(
                         }
                 end
         end,
+    lager:info("*** region params point 9", []),
     lager:info("region RespPB: ~p", [RespPB]),
     Resp = sibyl_utils:encode_gateway_resp_v1(
         RespPB,
         CurHeight,
         sibyl_mgr:sigfun()
     ),
+    lager:info("*** region params point 10", []),
     lager:info("region Resp: ~p", [Resp]),
     {ok, Resp, Ctx}.
-
--spec pocs(
-    blockchain:blockchain(),
-    boolean(),
-    gateway_pb:gateway_poc_req_v1_pb(),
-    grpcbox_stream:t()
-) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
-pocs(
-    undefined = _Chain,
-    _IsAlreadyStreamingPOCs,
-    #gateway_poc_req_v1_pb{} = _Msg,
-    _StreamState
-) ->
-    %% if chain not up we have no way to retrieve data so just return a 14/503
-    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
-    {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
-pocs(
-    _Chain,
-    true = _IsAlreadyStreamingPOCs,
-    #gateway_poc_req_v1_pb{} = _Msg,
-    StreamState
-) ->
-    %% we are already streaming POCs so do nothing further here
-    {ok, StreamState};
-pocs(
-    _Chain,
-    false = _IsAlreadyStreamingPOCs,
-    #gateway_poc_req_v1_pb{address = Addr, signature = Sig} = Msg,
-    StreamState
-) ->
-    lager:info("executing RPC pocs with msg ~p", [Msg]),
-    %% start a POC stream
-    %% confirm the sig is valid
-    PubKey = libp2p_crypto:bin_to_pubkey(Addr),
-    BaseReq = Msg#gateway_poc_req_v1_pb{signature = <<>>},
-    EncodedReq = gateway_pb:encode_msg(BaseReq),
-    case libp2p_crypto:verify(EncodedReq, Sig, PubKey) of
-        false ->
-            {grpc_error, {grpcbox_stream:code_to_status(14), <<"bad signature">>}};
-        true ->
-            %% topic key for POC streams is the pub key bin
-            %% streamed msgs will be received & published by the sibyl_poc_mgr
-            %% streamed POC msgs will be potential challenge notifications
-            Topic = sibyl_utils:make_poc_topic(Addr),
-            lager:info("subscribing to poc events for gw ~p", [Addr]),
-            ok = sibyl_bus:sub(Topic, self()),
-            HandlerState = grpcbox_stream:stream_handler_state(StreamState),
-            NewStreamState = grpcbox_stream:stream_handler_state(
-                StreamState,
-                HandlerState#{
-                    streaming_initialized => true
-                }
-            ),
-            {ok, NewStreamState}
-    end.
 
 %% ------------------------------------------------------------------
 %% Internal functions
 %% ------------------------------------------------------------------
--spec handle_event(sibyl_mgr:event(), grpcbox_stream:t()) -> grpcbox_stream:t().
-handle_event(
-    {event, _EventType, _Payload} = _Event,
-    StreamState
-) ->
-    lager:warning("received unhandled event ~p", [_Event]),
-    StreamState.
-
--spec maybe_init_stream_state(atom(), undefined | handler_state(), grpcbox_stream:t()) ->
-    grpcbox_stream:t().
-maybe_init_stream_state(RPC, undefined, StreamState) ->
-    lager:debug("handler init, stream state ~p", [StreamState]),
-    NewStreamState = init(RPC, StreamState),
-    NewStreamState;
-maybe_init_stream_state(_RPC, _HandlerState, StreamState) ->
-    StreamState.
-
 send_poc_report(OnionKeyHash, POC, Report) ->
     send_poc_report(OnionKeyHash, POC, Report, 30).
 send_poc_report(OnionKeyHash, POC, {ReportType, Report}, Retries) when Retries > 0 ->

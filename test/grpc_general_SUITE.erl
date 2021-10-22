@@ -255,7 +255,7 @@ config_update_test(Config) ->
     {ok, Stream} = grpc_client:new_stream(
         Connection,
         'helium.gateway',
-        stream,
+        stream_config_update,
         gateway_client_pb
     ),
 

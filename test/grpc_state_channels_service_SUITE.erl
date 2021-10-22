@@ -660,7 +660,7 @@ follow_sc_test(Config) ->
     {ok, Stream} = grpc_client:new_stream(
         Connection,
         'helium.gateway',
-        stream,
+        stream_sc_follow,
         gateway_client_pb
     ),
 
