@@ -23,6 +23,12 @@
     handle_info/3
 ]).
 
+%% config APIs
+-export([
+    config/2,
+    config_update/2
+]).
+
 %% routing APIs
 -export([
     routing/2
@@ -44,10 +50,20 @@
 %% as its those which are likely to manage their own state
 %% unary APIs only need to return the same passed in StreamState
 
+-spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
+%%
+%% config unary APIs
+%%
+init(_RPC = config, StreamState) ->
+    StreamState;
+%%
+%% config streaming APIs
+%%
+init(RPC = config_update, StreamState) ->
+    helium_config_impl:init(RPC, StreamState);
 %%
 %% routing streaming APIs
 %%
--spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
 init(RPC = routing, StreamState) ->
     helium_routing_impl:init(RPC, StreamState);
 %%
@@ -69,6 +85,10 @@ init(_RPC = close_sc, StreamState) ->
 %% Any API can potentially handle info msgs
 %%
 -spec handle_info(atom(), any(), grpcbox_stream:t()) -> grpcbox_stream:t().
+handle_info(_RPC = config, Msg, StreamState) ->
+    helium_config_impl:handle_info(Msg, StreamState);
+handle_info(_RPC = config_update, Msg, StreamState) ->
+    helium_config_impl:handle_info(Msg, StreamState);
 handle_info(_RPC = routing, Msg, StreamState) ->
     helium_routing_impl:handle_info(Msg, StreamState);
 handle_info(_RPC = is_active_sc, Msg, StreamState) ->
@@ -82,6 +102,21 @@ handle_info(_RPC = follow_sc, Msg, StreamState) ->
 handle_info(_RPC, _Msg, StreamState) ->
     lager:warning("got unhandled info msg, RPC ~p, Msg, ~p", [_RPC, _Msg]),
     StreamState.
+
+%%%-------------------------------------------------------------------
+%% Config RPC implementations
+%%%-------------------------------------------------------------------
+-spec config(
+    ctx:ctx(),
+    gateway_pb:gateway_config_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+config(Ctx, Message) -> helium_config_impl:config(Ctx, Message).
+
+-spec config_update(
+    gateway_pb:gateway_config_update_req_v1_pb(),
+    grpcbox_stream:t()
+) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
+config_update(Msg, StreamState) -> helium_config_impl:config_update(Msg, StreamState).
 
 %%%-------------------------------------------------------------------
 %% Routing RPC implementations

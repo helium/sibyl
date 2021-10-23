@@ -3,6 +3,7 @@
 -behaviour(gen_server).
 
 -include("../include/sibyl.hrl").
+-include("grpc/autogen/server/gateway_pb.hrl").
 
 -define(TID, val_mgr).
 -define(CHAIN, blockchain).
@@ -12,16 +13,17 @@
 -define(ROUTING_CF_NAME, routing).
 -define(STATE_CHANNEL_CF_NAME, state_channels).
 
--type event_type() :: binary().
--type event_types() :: [event_type()].
--type event() :: {event, binary(), any()} | {event, binary()}.
-
--export_type([event_type/0, event_types/0, event/0]).
-
 -record(state, {
     tid :: ets:tab(),
     commit_hook_refs = [] :: list()
 }).
+
+-type event_type() :: binary().
+-type event_types() :: [event_type()].
+-type event() :: {event, binary(), any()} | {event, binary()}.
+-type state() :: #state{}.
+
+-export_type([event_type/0, event_types/0, event/0]).
 
 %% ------------------------------------------------------------------
 %% gen_server exports
@@ -166,6 +168,12 @@ handle_info({blockchain_event, {new_chain, NC}}, State = #state{commit_hook_refs
     lager:debug("updating with new chain", []),
     ets:insert(?TID, {?CHAIN, NC}),
     {noreply, State};
+handle_info({blockchain_event, {add_block, _BlockHash, Sync, _Ledger} = Event}, State) when
+    Sync =:= false
+->
+    lager:debug("received add block event, sync is ~p", [Sync]),
+    ok = process_add_block_event(Event, State),
+    {noreply, State};
 handle_info(
     {event, EventTopic, _Payload} = _Msg,
     State
@@ -197,6 +205,60 @@ terminate(_Reason, _State = #state{commit_hook_refs = Refs}) ->
 %% ------------------------------------------------------------------
 %% Internal functions
 %% ------------------------------------------------------------------
+-spec process_add_block_event(
+    Event :: {add_block, binary(), boolean(), blockchain_ledger_v1:ledger()},
+    State :: state()
+) -> ok.
+process_add_block_event({add_block, BlockHash, _Sync, _Ledger}, _State) ->
+    Chain = ?MODULE:blockchain(),
+    case blockchain:get_block(BlockHash, Chain) of
+        {ok, Block} ->
+            BlockHeight = blockchain_block:height(Block),
+            %% check if there are any chain var txns in the block
+            %% if so send a notification to subscribed clients
+            %% containing the updates vars
+            %% TODO: replace the txn monitoring with the chain var hooks
+            %%       when that gets integrated
+            ok = check_for_chain_var_updates(Block, BlockHeight);
+        _ ->
+            %% err what?
+            ok
+    end.
+
+check_for_chain_var_updates(Block, BlockHeight) ->
+    Txns = blockchain_block:transactions(Block),
+    FilteredTxns = lists:filter(
+        fun(Txn) -> blockchain_txn:type(Txn) == blockchain_txn_vars_v1 end,
+        Txns
+    ),
+    UpdatedVarsPB =
+        lists:foldl(
+            fun(VarTxn, Acc) ->
+                Vars = maps:to_list(blockchain_txn_vars_v1:decoded_vars(VarTxn)),
+                EncodedVars = [
+                    #key_val_v1_pb{
+                        key = sibyl_utils:ensure(binary, K),
+                        val = sibyl_utils:ensure(binary, V)
+                    }
+                    || {K, V} <- Vars
+                ],
+                Acc ++ EncodedVars
+            end,
+            [],
+            FilteredTxns
+        ),
+    %% publish an event with the updated vars
+    %% all subscribed clients will get the same msg payload
+    Notification = sibyl_utils:encode_gateway_resp_v1(
+        #gateway_config_update_streamed_resp_v1_pb{vars = UpdatedVarsPB},
+        BlockHeight,
+        sibyl_mgr:sigfun()
+    ),
+    Topic = sibyl_utils:make_config_update_topic(),
+    sibyl_bus:pub(Topic, {config_update_notify, Notification}),
+    lager:info("notifying clients of chain var updates: ~p", [UpdatedVarsPB]),
+    ok.
+
 -spec add_commit_hooks() -> {ok, [reference() | atom()]}.
 add_commit_hooks() ->
     %% add any required commit hooks to the ledger

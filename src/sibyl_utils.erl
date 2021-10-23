@@ -7,13 +7,16 @@
     gateway_pb:gateway_sc_is_valid_resp_v1_pb()
     | gateway_pb:gateway_sc_close_resp_v1_pb()
     | gateway_pb:gateway_sc_follow_streamed_resp_v1_pb()
-    | gateway_pb:gateway_routing_streamed_resp_v1_pb().
+    | gateway_pb:gateway_routing_streamed_resp_v1_pb()
+    | gateway_pb:gateway_config_resp_v1_pb()
+    | gateway_pb:gateway_config_update_streamed_resp_v1_pb().
 
 %% API
 -export([
     make_event/1,
     make_event/2,
     make_sc_topic/1,
+    make_config_update_topic/0,
     encode_gateway_resp_v1/3,
     to_routing_pb/1,
     ensure/2,
@@ -31,11 +34,18 @@ make_event(EventType, EventPayload) ->
 make_sc_topic(SCID) ->
     <<?EVENT_STATE_CHANNEL_UPDATE/binary, SCID/binary>>.
 
+make_config_update_topic() ->
+    <<?EVENT_CONFIG_UPDATE_NOTIFICATION/binary>>.
+
 -spec encode_gateway_resp_v1(
     gateway_resp_type(),
     non_neg_integer(),
     function()
 ) -> gateway_pb:gateway_resp_v1_pb().
+encode_gateway_resp_v1(#gateway_config_resp_v1_pb{} = Msg, Height, SigFun) ->
+    do_encode_gateway_resp_v1({config_resp, Msg}, Height, SigFun);
+encode_gateway_resp_v1(#gateway_config_update_streamed_resp_v1_pb{} = Msg, Height, SigFun) ->
+    do_encode_gateway_resp_v1({config_update_streamed_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_sc_is_active_resp_v1_pb{} = Msg, Height, SigFun) ->
     do_encode_gateway_resp_v1({is_active_resp, Msg}, Height, SigFun);
 encode_gateway_resp_v1(#gateway_sc_is_overpaid_resp_v1_pb{} = Msg, Height, SigFun) ->
