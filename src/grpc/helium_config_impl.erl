@@ -2,6 +2,7 @@
 
 -include("../../include/sibyl.hrl").
 -include("../grpc/autogen/server/gateway_pb.hrl").
+-include_lib("helium_proto/include/blockchain_txn_vars_v1_pb.hrl").
 
 -ifdef(TEST).
 -define(MAX_KEY_SIZE, 5).
@@ -105,47 +106,33 @@ config(
     Response0 =
         case NumKeys > ?MAX_KEY_SIZE of
             true ->
-                {grpc_error,
-                    {grpcbox_stream:code_to_status(3),
-                        list_to_binary(
-                            lists:concat(["limit ", ?MAX_KEY_SIZE, ". keys presented ", NumKeys])
-                        )}};
+                {grpc_error, {
+                    grpcbox_stream:code_to_status(3),
+                    list_to_binary(
+                        lists:concat(["limit ", ?MAX_KEY_SIZE, ". keys presented ", NumKeys])
+                    )
+                }};
             false ->
                 %% iterate over the keys submitted in the request and retrieve
                 %% current chain var value for each
                 Res =
-                    lists:reverse(
-                        lists:foldl(
-                            fun(Key, Acc) ->
-                                try
-                                    case
-                                        blockchain_ledger_v1:config(
-                                            binary_to_existing_atom(Key, utf8),
-                                            Ledger
-                                        )
-                                    of
-                                        {ok, V} ->
-                                            [
-                                                #key_val_v1_pb{
-                                                    key = Key,
-                                                    val = sibyl_utils:ensure(binary, V)
-                                                }
-                                                | Acc
-                                            ];
-                                        {error, _} ->
-                                            [
-                                                #key_val_v1_pb{key = Key, val = undefined}
-                                                | Acc
-                                            ]
-                                    end
-                                catch
-                                    _:_ ->
-                                        [#key_val_v1_pb{key = Key, val = undefined} | Acc]
+                    lists:map(
+                        fun(Key) ->
+                            try
+                                case
+                                    blockchain_ledger_v1:config(
+                                        binary_to_existing_atom(Key, utf8),
+                                        Ledger
+                                    )
+                                of
+                                    {ok, V} -> to_var(Key, V);
+                                    {error, _} -> to_var(Key, undefined)
                                 end
-                            end,
-                            [],
-                            Keys
-                        )
+                            catch
+                                _:_ -> to_var(Key, undefined)
+                            end
+                        end,
+                        Keys
                     ),
                 #gateway_config_resp_v1_pb{result = Res}
         end,
@@ -156,6 +143,13 @@ config(
         sibyl_mgr:sigfun()
     ),
     {ok, Response1, Ctx}.
+
+to_var(Key, undefined) ->
+    #blockchain_var_v1_pb{
+        name = Key, type = undefined, value = undefined
+    };
+to_var(Key, V) ->
+    blockchain_txn_vars_v1:to_var(Key, V).
 
 -spec config_update(
     blockchain:blockchain(),

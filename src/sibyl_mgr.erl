@@ -231,32 +231,24 @@ check_for_chain_var_updates(Block, BlockHeight) ->
         fun(Txn) -> blockchain_txn:type(Txn) == blockchain_txn_vars_v1 end,
         Txns
     ),
-    UpdatedVarsPB =
-        lists:foldl(
-            fun(VarTxn, Acc) ->
+    UpdatedKeysPB =
+        lists:flatmap(
+            fun(VarTxn) ->
                 Vars = maps:to_list(blockchain_txn_vars_v1:decoded_vars(VarTxn)),
-                EncodedVars = [
-                    #key_val_v1_pb{
-                        key = sibyl_utils:ensure(binary, K),
-                        val = sibyl_utils:ensure(binary, V)
-                    }
-                    || {K, V} <- Vars
-                ],
-                Acc ++ EncodedVars
+                [sibyl_utils:ensure(binary, K) || {K, _V} <- Vars]
             end,
-            [],
             FilteredTxns
         ),
     %% publish an event with the updated vars
     %% all subscribed clients will get the same msg payload
     Notification = sibyl_utils:encode_gateway_resp_v1(
-        #gateway_config_update_streamed_resp_v1_pb{vars = UpdatedVarsPB},
+        #gateway_config_update_streamed_resp_v1_pb{keys = UpdatedKeysPB},
         BlockHeight,
         sibyl_mgr:sigfun()
     ),
     Topic = sibyl_utils:make_config_update_topic(),
     sibyl_bus:pub(Topic, {config_update_notify, Notification}),
-    lager:info("notifying clients of chain var updates: ~p", [UpdatedVarsPB]),
+    lager:info("notifying clients of chain var updates: ~p", [UpdatedKeysPB]),
     ok.
 
 -spec add_commit_hooks() -> {ok, [reference() | atom()]}.
