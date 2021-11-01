@@ -190,7 +190,7 @@ validators(
     Ledger = blockchain:ledger(Chain),
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
     %% get list of current validators from the cache
-    %% and then get a random selection of these with size
+    %% and then get a random sub set of these with size
     %% equal to NumVals
     Vals = sibyl_mgr:validators(),
     RandomVals = blockchain_utils:shuffle(Vals),

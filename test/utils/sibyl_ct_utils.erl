@@ -298,7 +298,7 @@ init_per_testcase(TestCase, Config) ->
         NodeNames
     ),
 
-    ConfigResult = pmap(
+    _ConfigResult = pmap(
         fun(Node) ->
             ct_rpc:call(Node, cover, start, []),
             ct_rpc:call(Node, application, load, [lager]),

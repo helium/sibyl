@@ -196,7 +196,7 @@ routing_updates_with_initial_msg_test(Config) ->
     OUI1 = ?config(oui1, Config),
 
     %% send the initial msg from the client with its safe height value
-    grpc_client:send(Stream, #{msg => {routing_req, #{height => 1}}}),
+    grpc_client:send(Stream, #{height => 1}),
 
     %% we expect to receive a response containing all the added routes from the init_per_testcase step
     %% we will receive this as our client height value is less that the last modified height for route updates
@@ -293,9 +293,10 @@ routing_updates_without_initial_msg_test(Config) ->
     %% get current height and add 1 and use for client header
     {ok, CurHeight0} = blockchain:height(Chain),
     ClientHeaderHeight = CurHeight0 + 1,
+    ct:pal("ClientHeaderHeight: ~p", [ClientHeaderHeight]),
 
     %% the stream requires an empty msg to be sent in order to initialise the service
-    grpc_client:send(Stream, #{msg => {routing_req, #{height => ClientHeaderHeight}}}),
+    grpc_client:send(Stream, #{height => 3}),
 
     %% we do not expect to receive a response containing all the added routes from the init_per_testcase step
     %% this is because the client supplied a height value greater than the height at which routes were last modified
