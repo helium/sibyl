@@ -121,7 +121,7 @@ config(
                             try
                                 case
                                     blockchain_ledger_v1:config(
-                                        binary_to_existing_atom(Key, utf8),
+                                        list_to_existing_atom(Key),
                                         Ledger
                                     )
                                 of

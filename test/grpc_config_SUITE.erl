@@ -159,7 +159,7 @@ config_test(Config) ->
         } = Result1
     }} = grpc_client:unary(
         Connection,
-        #{keys => [<<"sc_grace_blocks">>, <<"dc_payload_size">>]},
+        #{keys => ["sc_grace_blocks", "dc_payload_size"]},
         'helium.gateway',
         'config',
         gateway_client_pb,
@@ -188,7 +188,7 @@ config_test(Config) ->
         } = Result2
     }} = grpc_client:unary(
         Connection,
-        #{keys => [<<"bad_key1">>, <<"bad_key2">>]},
+        #{keys => ["bad_key1", "bad_key2"]},
         'helium.gateway',
         'config',
         gateway_client_pb,
@@ -215,7 +215,7 @@ config_test(Config) ->
     }} =
         _Result3 = grpc_client:unary(
             Connection,
-            #{keys => [<<"key1">>, <<"key2">>, <<"key3">>, <<"key4">>, <<"key5">>, <<"key6">>]},
+            #{keys => ["key1", "key2", "key3", "key4", "key5", "key6"]},
             'helium.gateway',
             'config',
             gateway_client_pb,
@@ -296,8 +296,8 @@ config_update_test(Config) ->
     ct:pal("Response Data0: ~p", [Data0]),
     ?assertEqual(
         [
-            <<"max_open_sc">>,
-            <<"sc_grace_blocks">>
+            "max_open_sc",
+            "sc_grace_blocks"
         ],
         ConfigUpdateMsg0
     ),
