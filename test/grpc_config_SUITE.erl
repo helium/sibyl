@@ -172,8 +172,8 @@ config_test(Config) ->
     #{result := KeyVals} = ResponseMsg1,
     ?assertEqual(
         [
-            #{key => <<"sc_grace_blocks">>, val => <<"5">>},
-            #{key => <<"dc_payload_size">>, val => <<"24">>}
+            #{name => "sc_grace_blocks", type => "int", value => <<"5">>},
+            #{name => "dc_payload_size", type => "int", value => <<"24">>}
         ],
         KeyVals
     ),
@@ -201,8 +201,8 @@ config_test(Config) ->
     #{result := KeyVals2} = ResponseMsg2,
     ?assertEqual(
         [
-            #{key => <<"bad_key1">>, val => <<>>},
-            #{key => <<"bad_key2">>, val => <<>>}
+            #{name => "bad_key1", type => [], value => <<>>},
+            #{name => "bad_key2", type => [], value => <<>>}
         ],
         KeyVals2
     ),
@@ -225,8 +225,11 @@ config_test(Config) ->
 
 config_update_test(Config) ->
     %% exercise the streaming API config_update
-    %% when initiated, the client will be streamed any updates to chain vars
-    %% the received payload will contain a list of each modified chainvar and its value
+    %% when initiated, the client will be streamed notifications of updated chain vars
+    %% the received payload will contain a list of each modified chainvar
+    %% no values will be returned to avoid unnecessary data transfer to light GWs
+    %% instead a client can pull the updated value using the unary config API
+    %% should it be interested in the updated var
     ConsensusMembers = ?config(consensus_members, Config),
     [GatewayNode1 | _] = ?config(nodes, Config),
     ct:pal("GatewayNode1: ~p", [GatewayNode1]),
@@ -257,7 +260,7 @@ config_update_test(Config) ->
     #{<<":status">> := Headers0HttpStatus} = Headers0,
     ?assertEqual(Headers0HttpStatus, <<"200">>),
 
-    %% update a chain var value and confirm we get its updated value streamed
+    %% update a chain var value and confirm we get notified of it being modified
     Vars = #{sc_grace_blocks => 8, max_open_sc => 4},
     VarTxn = blockchain_txn_vars_v1:new(Vars, 3),
     Proof = blockchain_txn_vars_v1:create_proof(Priv, VarTxn),
@@ -288,13 +291,13 @@ config_update_test(Config) ->
     ok = sibyl_ct_utils:wait_until_local_height(3),
 
     %% confirm we receive a config update with the two new chain vars
-    {data, #{height := _Height0, msg := {config_update_streamed_resp, #{vars := ConfigUpdateMsg0}}}} =
+    {data, #{height := _Height0, msg := {config_update_streamed_resp, #{keys := ConfigUpdateMsg0}}}} =
         Data0 = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Data0: ~p", [Data0]),
     ?assertEqual(
         [
-            #{key => <<"max_open_sc">>, val => <<"4">>},
-            #{key => <<"sc_grace_blocks">>, val => <<"8">>}
+            <<"max_open_sc">>,
+            <<"sc_grace_blocks">>
         ],
         ConfigUpdateMsg0
     ),
