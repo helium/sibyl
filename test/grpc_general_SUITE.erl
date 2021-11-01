@@ -160,7 +160,7 @@ config_test(Config) ->
         } = Result1
     }} = grpc_client:unary(
         Connection,
-        #{keys => [<<"sc_grace_blocks">>, <<"dc_payload_size">>]},
+        #{keys => ["sc_grace_blocks", "dc_payload_size"]},
         'helium.gateway',
         'config',
         gateway_client_pb,
@@ -173,8 +173,8 @@ config_test(Config) ->
     #{result := KeyVals} = ResponseMsg1,
     ?assertEqual(
         [
-            #{key => <<"sc_grace_blocks">>, val => <<"5">>},
-            #{key => <<"dc_payload_size">>, val => <<"24">>}
+            #{name => "sc_grace_blocks", type => "int", value => <<"5">>},
+            #{name => "dc_payload_size", type => "int", value => <<"24">>}
         ],
         KeyVals
     ),
@@ -189,7 +189,7 @@ config_test(Config) ->
         } = Result2
     }} = grpc_client:unary(
         Connection,
-        #{keys => [<<"bad_key1">>, <<"bad_key2">>]},
+        #{keys => ["bad_key1", "bad_key2"]},
         'helium.gateway',
         'config',
         gateway_client_pb,
@@ -202,8 +202,8 @@ config_test(Config) ->
     #{result := KeyVals2} = ResponseMsg2,
     ?assertEqual(
         [
-            #{key => <<"bad_key1">>, val => <<>>},
-            #{key => <<"bad_key2">>, val => <<>>}
+            #{name => "bad_key1", type => [], value => <<>>},
+            #{name => "bad_key2", type => [], value => <<>>}
         ],
         KeyVals2
     ),
@@ -219,7 +219,7 @@ config_test(Config) ->
         } = Result3
     }} = grpc_client:unary(
         Connection,
-        #{keys => [<<"key1">>, <<"key2">>, <<"key3">>, <<"key4">>, <<"key5">>, <<"key6">>]},
+        #{keys => ["key1", "key2", "key3", "key4", "key5", "key6"]},
         'helium.gateway',
         'config',
         gateway_client_pb,
@@ -298,13 +298,13 @@ config_update_test(Config) ->
     ok = sibyl_ct_utils:wait_until_local_height(3),
 
     %% confirm we receive a config update with the two new chain vars
-    {data, #{height := _Height0, msg := {config_update_streamed_resp, #{vars := ConfigUpdateMsg0}}}} =
+    {data, #{height := _Height0, msg := {config_update_streamed_resp, #{keys := ConfigUpdateMsg0}}}} =
         Data0 = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Data0: ~p", [Data0]),
     ?assertEqual(
         [
-            #{key => <<"max_open_sc">>, val => <<"4">>},
-            #{key => <<"sc_grace_blocks">>, val => <<"8">>}
+            "max_open_sc",
+            "sc_grace_blocks"
         ],
         ConfigUpdateMsg0
     ),
