@@ -17,7 +17,7 @@
     make_event/2,
     make_sc_topic/1,
     make_config_update_topic/0,
-    encode_gateway_resp_v1/3,
+    encode_gateway_resp_v1/2,
     to_routing_pb/1,
     ensure/2,
     ensure/3
@@ -39,23 +39,22 @@ make_config_update_topic() ->
 
 -spec encode_gateway_resp_v1(
     gateway_resp_type(),
-    non_neg_integer(),
     function()
 ) -> gateway_pb:gateway_resp_v1_pb().
-encode_gateway_resp_v1(#gateway_config_resp_v1_pb{} = Msg, Height, SigFun) ->
-    do_encode_gateway_resp_v1({config_resp, Msg}, Height, SigFun);
-encode_gateway_resp_v1(#gateway_config_update_streamed_resp_v1_pb{} = Msg, Height, SigFun) ->
-    do_encode_gateway_resp_v1({config_update_streamed_resp, Msg}, Height, SigFun);
-encode_gateway_resp_v1(#gateway_sc_is_active_resp_v1_pb{} = Msg, Height, SigFun) ->
-    do_encode_gateway_resp_v1({is_active_resp, Msg}, Height, SigFun);
-encode_gateway_resp_v1(#gateway_sc_is_overpaid_resp_v1_pb{} = Msg, Height, SigFun) ->
-    do_encode_gateway_resp_v1({is_overpaid_resp, Msg}, Height, SigFun);
-encode_gateway_resp_v1(#gateway_sc_close_resp_v1_pb{} = Msg, Height, SigFun) ->
-    do_encode_gateway_resp_v1({close_resp, Msg}, Height, SigFun);
-encode_gateway_resp_v1(#gateway_sc_follow_streamed_resp_v1_pb{} = Msg, Height, SigFun) ->
-    do_encode_gateway_resp_v1({follow_streamed_resp, Msg}, Height, SigFun);
-encode_gateway_resp_v1(#gateway_routing_streamed_resp_v1_pb{} = Msg, Height, SigFun) ->
-    do_encode_gateway_resp_v1({routing_streamed_resp, Msg}, Height, SigFun).
+encode_gateway_resp_v1(#gateway_config_resp_v1_pb{} = Msg, SigFun) ->
+    do_encode_gateway_resp_v1({config_resp, Msg}, SigFun);
+encode_gateway_resp_v1(#gateway_config_update_streamed_resp_v1_pb{} = Msg, SigFun) ->
+    do_encode_gateway_resp_v1({config_update_streamed_resp, Msg}, SigFun);
+encode_gateway_resp_v1(#gateway_sc_is_active_resp_v1_pb{} = Msg, SigFun) ->
+    do_encode_gateway_resp_v1({is_active_resp, Msg}, SigFun);
+encode_gateway_resp_v1(#gateway_sc_is_overpaid_resp_v1_pb{} = Msg, SigFun) ->
+    do_encode_gateway_resp_v1({is_overpaid_resp, Msg}, SigFun);
+encode_gateway_resp_v1(#gateway_sc_close_resp_v1_pb{} = Msg, SigFun) ->
+    do_encode_gateway_resp_v1({close_resp, Msg}, SigFun);
+encode_gateway_resp_v1(#gateway_sc_follow_streamed_resp_v1_pb{} = Msg, SigFun) ->
+    do_encode_gateway_resp_v1({follow_streamed_resp, Msg}, SigFun);
+encode_gateway_resp_v1(#gateway_routing_streamed_resp_v1_pb{} = Msg, SigFun) ->
+    do_encode_gateway_resp_v1({routing_streamed_resp, Msg}, SigFun).
 
 -spec to_routing_pb(blockchain_ledger_routing_v1:routing()) -> gateway_pb:gateway_routing_pb().
 to_routing_pb(Route) ->
@@ -132,12 +131,22 @@ ensure(integer_or_default, Value, Default) ->
 %% ------------------------------------------------------------------
 -spec do_encode_gateway_resp_v1(
     {atom(), gateway_resp_type()},
-    non_neg_integer(),
     function()
 ) -> gateway_pb:gateway_resp_v1_pb().
-do_encode_gateway_resp_v1(Msg, Height, SigFun) ->
+do_encode_gateway_resp_v1(Msg, SigFun) ->
+    Chain = sibyl_mgr:blockchain(),
+    Ledger = blockchain:ledger(Chain),
+    %% get data points to include in our attestation
+    %% including current height of the validator,
+    %% block timestamp & block age
+    {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
+    {ok, HeadBlock} = blockchain:head_block(Chain),
+    BlockTime = blockchain_block_v1:time(HeadBlock),
+    BlockAge = erlang:system_time(seconds) - blockchain_block:time(HeadBlock),
     Update = #gateway_resp_v1_pb{
         height = Height,
+        block_time = BlockTime,
+        block_age = BlockAge,
         msg = Msg,
         signature = <<>>
     },

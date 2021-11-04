@@ -149,7 +149,6 @@ is_active_sc(
     #gateway_sc_is_active_req_v1_pb{sc_id = SCID, sc_owner = SCOwner} = _Message
 ) ->
     lager:info("executing RPC is_active with msg ~p", [_Message]),
-    {ok, CurHeight} = get_height(),
     Ledger = blockchain:ledger(Chain),
     Response0 =
         case get_ledger_state_channel(SCID, SCOwner, Ledger) of
@@ -172,7 +171,6 @@ is_active_sc(
         end,
     Response1 = sibyl_utils:encode_gateway_resp_v1(
         Response0,
-        CurHeight,
         sibyl_mgr:sigfun()
     ),
     {ok, Response1, Ctx}.
@@ -192,7 +190,6 @@ is_overpaid_sc(
         _Message
 ) ->
     lager:info("executing RPC is_overpaid with msg ~p", [_Message]),
-    {ok, CurHeight} = get_height(),
     Response0 = #gateway_sc_is_overpaid_resp_v1_pb{
         overpaid = check_is_overpaid_sc(SCID, SCOwner, TotalDCs, Chain),
         sc_id = SCID,
@@ -200,7 +197,6 @@ is_overpaid_sc(
     },
     Response1 = sibyl_utils:encode_gateway_resp_v1(
         Response0,
-        CurHeight,
         sibyl_mgr:sigfun()
     ),
     {ok, Response1, Ctx}.
@@ -220,11 +216,9 @@ close_sc(_Chain, Ctx, #gateway_sc_close_req_v1_pb{close_txn = CloseTxn} = _Messa
     SC = blockchain_txn_state_channel_close_v1:state_channel(CloseTxn),
     SCID = blockchain_state_channel_v1:id(SC),
     ok = blockchain_worker:submit_txn(CloseTxn),
-    {ok, CurHeight} = get_height(),
     Response0 = #gateway_sc_close_resp_v1_pb{sc_id = SCID, response = <<"ok">>},
     Response1 = sibyl_utils:encode_gateway_resp_v1(
         Response0,
-        CurHeight,
         sibyl_mgr:sigfun()
     ),
     {ok, Response1, Ctx}.
@@ -640,7 +634,7 @@ maybe_send_follow_msg(
     sc_state(),
     grpcbox_stream:t()
 ) -> {boolean(), grpcbox_stream:t(), list()}.
-send_follow_msg(SCID, SCOwner, {SCNewState, SendList}, Height, _SCOldState, StreamState) ->
+send_follow_msg(SCID, SCOwner, {SCNewState, SendList}, _Height, _SCOldState, StreamState) ->
     lager:info("sending SC event ~p for SCID ~p and SCOwner ~p", [SCNewState, SCID, SCOwner]),
     Msg0 = #gateway_sc_follow_streamed_resp_v1_pb{
         close_state = SCNewState,
@@ -649,7 +643,6 @@ send_follow_msg(SCID, SCOwner, {SCNewState, SendList}, Height, _SCOldState, Stre
     },
     Msg1 = sibyl_utils:encode_gateway_resp_v1(
         Msg0,
-        Height,
         sibyl_mgr:sigfun()
     ),
     NewStreamState = grpcbox_stream:send(false, Msg1, StreamState),

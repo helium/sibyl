@@ -101,7 +101,6 @@ config(
 ) ->
     lager:info("executing RPC config with msg ~p", [Request]),
     Ledger = blockchain:ledger(Chain),
-    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
     NumKeys = length(Keys),
     Response0 =
         case NumKeys > ?MAX_KEY_SIZE of
@@ -139,14 +138,15 @@ config(
 
     Response1 = sibyl_utils:encode_gateway_resp_v1(
         Response0,
-        CurHeight,
         sibyl_mgr:sigfun()
     ),
     {ok, Response1, Ctx}.
 
 to_var(Key, undefined) ->
     #blockchain_var_v1_pb{
-        name = Key, type = undefined, value = undefined
+        name = Key,
+        type = undefined,
+        value = undefined
     };
 to_var(Key, V) ->
     blockchain_txn_vars_v1:to_var(Key, V).

@@ -352,6 +352,8 @@ assert_route_update(
     #{
         msg := {routing_streamed_resp, ResponseMsg},
         height := _ResponseHeight,
+        block_time := _ResponseBlockHeight,
+        block_age := _ResponseBlockAge,
         signature := _ResponseSig
     } = _RouteUpdate,
     ExpectedRoutes

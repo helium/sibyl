@@ -93,7 +93,6 @@ handle_event(
     ]),
     Chain = sibyl_mgr:blockchain(),
     Ledger = blockchain:ledger(Chain),
-    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
     %% get the routing for each changed key & send to clients
     %% clients will only receive a single routing update per block epoch
     %% the update will contain 1 or more modified routes
@@ -118,7 +117,6 @@ handle_event(
     },
     Msg1 = sibyl_utils:encode_gateway_resp_v1(
         Msg0,
-        CurHeight,
         sibyl_mgr:sigfun()
     ),
     NewStream = grpcbox_stream:send(false, Msg1, StreamState),
@@ -150,7 +148,6 @@ maybe_send_inital_all_routes_msg(ClientHeight, StreamState) ->
             %% get the route data
             Chain = sibyl_mgr:blockchain(),
             Ledger = blockchain:ledger(Chain),
-            {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
             case blockchain_ledger_v1:get_routes(Ledger) of
                 {ok, Routes} ->
                     Msg0 = #gateway_routing_streamed_resp_v1_pb{
@@ -158,7 +155,6 @@ maybe_send_inital_all_routes_msg(ClientHeight, StreamState) ->
                     },
                     Msg1 = sibyl_utils:encode_gateway_resp_v1(
                         Msg0,
-                        CurHeight,
                         sibyl_mgr:sigfun()
                     ),
                     NewStream = grpcbox_stream:send(false, Msg1, StreamState),
