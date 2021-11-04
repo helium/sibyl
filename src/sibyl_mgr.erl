@@ -4,6 +4,7 @@
 
 -include("../include/sibyl.hrl").
 -include("grpc/autogen/server/gateway_pb.hrl").
+-include_lib("blockchain/include/blockchain_vars.hrl").
 
 -define(TID, val_mgr).
 -define(CHAIN, blockchain).
@@ -281,14 +282,25 @@ check_for_chain_var_updates(Block, BlockHeight) ->
 
 -spec update_validator_cache(Ledger :: blockchain_ledger_v1:ledger()) -> ok.
 update_validator_cache(Ledger) ->
+    {ok, HBInterval} = blockchain:config(?validator_liveness_interval, Ledger),
+    {ok, HBGrace} = blockchain:config(?validator_liveness_grace_period, Ledger),
+    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
     Vals =
         blockchain_ledger_v1:cf_fold(
             validators,
-            fun({Addr, _BinVal}, Acc) ->
-                case get_validator_routing(Addr) of
-                    {ok, URI} ->
-                        [{Addr, URI} | Acc];
-                    {error, _} ->
+            fun({Addr, BinVal}, Acc) ->
+                Validator = blockchain_ledger_validator_v1:deserialize(BinVal),
+                case (blockchain_ledger_validator_v1:last_heartbeat(Validator) +
+                        HBInterval + HBGrace)
+                            >= CurHeight of
+                    true ->
+                        case get_validator_routing(Addr) of
+                            {ok, URI} ->
+                                [{Addr, URI} | Acc];
+                            {error, _} ->
+                                Acc
+                        end;
+                    false ->
                         Acc
                 end
             end,
