@@ -4,14 +4,22 @@
 
 -include("../include/sibyl.hrl").
 -include("grpc/autogen/server/gateway_pb.hrl").
+-include_lib("blockchain/include/blockchain_vars.hrl").
 
 -define(TID, val_mgr).
 -define(CHAIN, blockchain).
 -define(HEIGHT, height).
 -define(SIGFUN, sigfun).
 -define(SERVER, ?MODULE).
+-define(VALIDATORS, validators).
 -define(ROUTING_CF_NAME, routing).
 -define(STATE_CHANNEL_CF_NAME, state_channels).
+
+-ifdef(TEST).
+-define(VALIDATOR_CACHE_REFRESH, 5).
+-else.
+-define(VALIDATOR_CACHE_REFRESH, 100).
+-endif.
 
 -record(state, {
     tid :: ets:tab(),
@@ -46,7 +54,8 @@
     get_last_modified/1,
     blockchain/0,
     height/0,
-    sigfun/0
+    sigfun/0,
+    validators/0
 ]).
 
 %% ------------------------------------------------------------------
@@ -103,6 +112,14 @@ sigfun() ->
         X -> X
     catch
         _:_ -> undefined
+    end.
+
+-spec validators() -> function() | undefined.
+validators() ->
+    try ets:lookup_element(?TID, ?VALIDATORS, 2) of
+        X -> X
+    catch
+        _:_ -> []
     end.
 
 make_ets_table() ->
@@ -209,10 +226,18 @@ terminate(_Reason, _State = #state{commit_hook_refs = Refs}) ->
     Event :: {add_block, binary(), boolean(), blockchain_ledger_v1:ledger()},
     State :: state()
 ) -> ok.
-process_add_block_event({add_block, BlockHash, _Sync, _Ledger}, _State) ->
+process_add_block_event({add_block, BlockHash, _Sync, Ledger}, _State) ->
     Chain = ?MODULE:blockchain(),
     case blockchain:get_block(BlockHash, Chain) of
         {ok, Block} ->
+            BlockHeight = blockchain_block:height(Block),
+            %% update the list of validators in the cache every N blocks
+            case BlockHeight rem ?VALIDATOR_CACHE_REFRESH == 0 of
+                true ->
+                    ok = update_validator_cache(Ledger);
+                false ->
+                    ok
+            end,
             %% check if there are any chain var txns in the block
             %% if so send a notification to subscribed clients
             %% containing the updates vars
@@ -248,6 +273,46 @@ check_for_chain_var_updates(Block) ->
     sibyl_bus:pub(Topic, {config_update_notify, Notification}),
     lager:info("notifying clients of chain var updates: ~p", [UpdatedKeysPB]),
     ok.
+
+-spec update_validator_cache(Ledger :: blockchain_ledger_v1:ledger()) -> ok.
+update_validator_cache(Ledger) ->
+    {ok, HBInterval} = blockchain:config(?validator_liveness_interval, Ledger),
+    {ok, HBGrace} = blockchain:config(?validator_liveness_grace_period, Ledger),
+    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
+    Vals =
+        blockchain_ledger_v1:cf_fold(
+            validators,
+            fun({Addr, BinVal}, Acc) ->
+                Validator = blockchain_ledger_validator_v1:deserialize(BinVal),
+                case
+                    (blockchain_ledger_validator_v1:last_heartbeat(Validator) +
+                        HBInterval + HBGrace) >=
+                        CurHeight
+                of
+                    true ->
+                        case get_validator_routing(Addr) of
+                            {ok, URI} ->
+                                [{Addr, URI} | Acc];
+                            {error, _} ->
+                                Acc
+                        end;
+                    false ->
+                        Acc
+                end
+            end,
+            [],
+            Ledger
+        ),
+    _ = ets:insert(?TID, {?VALIDATORS, Vals}),
+    ok.
+
+get_validator_routing(Addr) ->
+    case sibyl_utils:address_data([Addr]) of
+        [] ->
+            {error, no_routing_data};
+        [#routing_address_pb{uri = URI}] ->
+            {ok, URI}
+    end.
 
 -spec add_commit_hooks() -> {ok, [reference() | atom()]}.
 add_commit_hooks() ->

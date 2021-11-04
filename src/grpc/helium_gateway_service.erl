@@ -29,6 +29,11 @@
     config_update/2
 ]).
 
+%% validators APIs
+-export([
+    validators/2
+]).
+
 %% routing APIs
 -export([
     routing/2
@@ -51,6 +56,11 @@
 %% unary APIs only need to return the same passed in StreamState
 
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
+%%
+%% validators unary APIs
+%%
+init(_RPC = validators, StreamState) ->
+    StreamState;
 %%
 %% config unary APIs
 %%
@@ -85,6 +95,8 @@ init(_RPC = close_sc, StreamState) ->
 %% Any API can potentially handle info msgs
 %%
 -spec handle_info(atom(), any(), grpcbox_stream:t()) -> grpcbox_stream:t().
+handle_info(_RPC = validators, Msg, StreamState) ->
+    helium_validators_impl:handle_info(Msg, StreamState);
 handle_info(_RPC = config, Msg, StreamState) ->
     helium_config_impl:handle_info(Msg, StreamState);
 handle_info(_RPC = config_update, Msg, StreamState) ->
@@ -106,6 +118,12 @@ handle_info(_RPC, _Msg, StreamState) ->
 %%%-------------------------------------------------------------------
 %% Config RPC implementations
 %%%-------------------------------------------------------------------
+-spec validators(
+    ctx:ctx(),
+    gateway_pb:gateway_validators_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+validators(Ctx, Message) -> helium_validators_impl:validators(Ctx, Message).
+
 -spec config(
     ctx:ctx(),
     gateway_pb:gateway_config_req_v1_pb()
