@@ -194,6 +194,7 @@ routing_updates_with_initial_msg_test(Config) ->
     Connection = ?config(grpc_connection, Config),
     Stream = ?config(grpc_stream, Config),
     OUI1 = ?config(oui1, Config),
+    LocalSwarm = blockchain_swarm:swarm(),
 
     %% send the initial msg from the client with its safe height value
     grpc_client:send(Stream, #{height => 1}),
@@ -269,11 +270,20 @@ routing_updates_with_initial_msg_test(Config) ->
     {ok, ExpRoutes2} = blockchain_ledger_v1:get_routes(Ledger),
     ct:pal("Expected routes 1 ~p", [ExpRoutes2]),
 
-    timer:sleep(20000),
-
     {data, Routes2} = grpc_client:rcv(Stream, 5000),
     ct:pal("Route Update: ~p", [Routes2]),
     assert_route_update(Routes2, ExpRoutes2),
+
+    %% wait a bunch of blocks and confirm we dont get any unexpected / stray updates
+    ok = sibyl_ct_utils:local_add_and_gossip_fake_blocks(
+        7,
+        ConsensusMembers,
+        LocalSwarm,
+        Chain,
+        self()
+    ),
+    ok = sibyl_ct_utils:wait_until_local_height(11),
+    empty = grpc_client:get(Stream),
 
     grpc_client:stop_stream(Stream),
     grpc_client:stop_connection(Connection),

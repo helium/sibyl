@@ -232,6 +232,34 @@ config_test(Config) ->
     #{error := ErrorMsg3, details := ErrorDetails3} = ResponseMsg3,
     ?assertEqual(<<"max_key_size_exceeded">>, ErrorMsg3),
     ?assertEqual(<<"limit 5. keys presented 6">>, ErrorDetails3),
+
+    %% test a request with zero keys
+    %% it should return an empty list response payload
+    {ok, #{
+        headers := Headers4,
+        result := #{
+            msg := {config_resp, ResponseMsg4},
+            height := _ResponseHeight4,
+            signature := _ResponseSig4
+        } = Result4
+    }} = grpc_client:unary(
+        Connection,
+        #{keys => []},
+        'helium.gateway',
+        'config',
+        gateway_client_pb,
+        []
+    ),
+    ct:pal("Response Headers: ~p", [Headers4]),
+    ct:pal("Response Body: ~p", [Result4]),
+    #{<<":status">> := HttpStatus4} = Headers4,
+    ?assertEqual(HttpStatus4, <<"200">>),
+    #{result := KeyVals4} = ResponseMsg4,
+    ?assertEqual(
+        [],
+        KeyVals4
+    ),
+
     ok.
 
 config_update_test(Config) ->
