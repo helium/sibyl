@@ -60,7 +60,7 @@ check_challenge_target(
     lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 check_challenge_target(
-    Chain,
+    _Chain,
     Ctx,
     #gateway_poc_check_challenge_target_req_v1_pb{
         address = ChallengeePubKeyBin,
@@ -73,8 +73,6 @@ check_challenge_target(
     } = Request
 ) ->
     lager:info("executing RPC check_challenge_target with msg ~p", [Request]),
-    Ledger = blockchain:ledger(Chain),
-    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
     PubKey = libp2p_crypto:bin_to_pubkey(ChallengeePubKeyBin),
     %% verify the signature of the request
     BaseReq = Request#gateway_poc_check_challenge_target_req_v1_pb{challengee_sig = <<>>},
@@ -97,7 +95,6 @@ check_challenge_target(
                     },
                     Response1 = sibyl_utils:encode_gateway_resp_v1(
                         Response0,
-                        CurHeight,
                         sibyl_mgr:sigfun()
                     ),
                     {ok, Response1, Ctx};
@@ -109,7 +106,6 @@ check_challenge_target(
                     },
                     Response1 = sibyl_utils:encode_gateway_resp_v1(
                         Response0,
-                        CurHeight,
                         sibyl_mgr:sigfun()
                     ),
                     {ok, Response1, Ctx}
@@ -132,7 +128,6 @@ send_report(
     lager:info("executing RPC send_report with msg ~p", [_Message]),
     Chain = sibyl_mgr:blockchain(),
     Ledger = blockchain:ledger(Chain),
-    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
     %% find the POC in the ledger using onionkeyhash as key
     RespPB =
         case blockchain_ledger_v1:find_public_poc(OnionKeyHash, Ledger) of
@@ -148,7 +143,6 @@ send_report(
         end,
     Resp = sibyl_utils:encode_gateway_resp_v1(
         RespPB,
-        CurHeight,
         sibyl_mgr:sigfun()
     ),
     {ok, Resp, Ctx}.
@@ -169,7 +163,6 @@ poc_key_to_public_uri(
     lager:info("executing RPC poc_key_to_public_uri with msg ~p", [_Message]),
     Chain = sibyl_mgr:blockchain(),
     Ledger = blockchain:ledger(Chain),
-    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
     RespPB =
         case blockchain_ledger_v1:find_public_poc(OnionKeyHash, Ledger) of
             {error, not_found} ->
@@ -194,7 +187,6 @@ poc_key_to_public_uri(
         end,
     Resp = sibyl_utils:encode_gateway_resp_v1(
         RespPB,
-        CurHeight,
         sibyl_mgr:sigfun()
     ),
     {ok, Resp, Ctx}.
@@ -215,7 +207,6 @@ region_params(
     lager:info("executing RPC region_params with msg ~p", [Request]),
     Chain = sibyl_mgr:blockchain(),
     Ledger = blockchain:ledger(Chain),
-    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
     PubKey = libp2p_crypto:bin_to_pubkey(Addr),
     BaseReq = Request#gateway_poc_region_params_req_v1_pb{signature = <<>>},
     EncodedReq = gateway_pb:encode_msg(BaseReq),
@@ -274,7 +265,6 @@ region_params(
     lager:info("region RespPB: ~p", [RespPB]),
     Resp = sibyl_utils:encode_gateway_resp_v1(
         RespPB,
-        CurHeight,
         sibyl_mgr:sigfun()
     ),
     lager:info("region Resp: ~p", [Resp]),

@@ -151,8 +151,6 @@ run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, Vars) ->
                 [ChallengerRoutingAddress] ->
                     lager:info("ChallengerAddr: ~p", [ChallengerAddr]),
                     lager:info("ChallengerRoutingAddress: ~p", [ChallengerRoutingAddress]),
-
-                    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
                     NotificationPB = #gateway_poc_challenge_notification_resp_v1_pb{
                         challenger = ChallengerRoutingAddress,
                         block_hash = BlockHash,
@@ -160,7 +158,6 @@ run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, Vars) ->
                     },
                     Notification = sibyl_utils:encode_gateway_resp_v1(
                         NotificationPB,
-                        CurHeight,
                         sibyl_mgr:sigfun()
                     ),
                     %% send the notification to all the GWs in the zone, informing them they might be being challenged

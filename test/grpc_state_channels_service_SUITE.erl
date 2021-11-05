@@ -284,6 +284,8 @@ is_active_sc_test(Config) ->
         result := #{
             msg := {is_active_resp, ResponseMsg1},
             height := _ResponseHeight1,
+            block_time := _ResponseBlockHeight,
+            block_age := _ResponseBlockAge,
             signature := _ResponseSig1
         } = Result1
     }} = grpc_client:unary(
@@ -309,6 +311,8 @@ is_active_sc_test(Config) ->
         result := #{
             msg := {is_active_resp, ResponseMsg2},
             height := _ResponseHeight2,
+            block_time := _ResponseBlockHeight,
+            block_age := _ResponseBlockAge,
             signature := _ResponseSig2
         } = Result2
     }} = grpc_client:unary(
@@ -405,6 +409,8 @@ is_overpaid_sc_test(Config) ->
         result := #{
             msg := {is_overpaid_resp, ResponseMsg1},
             height := _ResponseHeight1,
+            block_time := _ResponseBlockHeight,
+            block_age := _ResponseBlockAge,
             signature := _ResponseSig1
         } = Result1
     }} = grpc_client:unary(
@@ -429,6 +435,8 @@ is_overpaid_sc_test(Config) ->
         result := #{
             msg := {is_overpaid_resp, ResponseMsg2},
             height := _ResponseHeight2,
+            block_time := _ResponseBlockHeight,
+            block_age := _ResponseBlockAge,
             signature := _ResponseSig2
         } = Result2
     }} = grpc_client:unary(
@@ -542,6 +550,8 @@ close_sc_test(Config) ->
         result := #{
             msg := {close_resp, ResponseMsg},
             height := _ResponseHeight,
+            block_time := _ResponseBlockHeight,
+            block_age := _ResponseBlockAge,
             signature := _ResponseSig
         } = Result
     }} = grpc_client:unary(

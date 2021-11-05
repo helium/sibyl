@@ -523,7 +523,7 @@ maybe_send_follow_msg(
     sc_state(),
     grpcbox_stream:t()
 ) -> {boolean(), grpcbox_stream:t(), list()}.
-send_follow_msg(SCID, SCOwner, {SCNewState, SendList}, Height, _SCOldState, StreamState) ->
+send_follow_msg(SCID, SCOwner, {SCNewState, SendList}, _Height, _SCOldState, StreamState) ->
     lager:info("sending SC event ~p for SCID ~p and SCOwner ~p", [SCNewState, SCID, SCOwner]),
     Msg0 = #gateway_sc_follow_streamed_resp_v1_pb{
         close_state = SCNewState,
@@ -532,7 +532,6 @@ send_follow_msg(SCID, SCOwner, {SCNewState, SendList}, Height, _SCOldState, Stre
     },
     Msg1 = sibyl_utils:encode_gateway_resp_v1(
         Msg0,
-        Height,
         sibyl_mgr:sigfun()
     ),
     NewStreamState = grpcbox_stream:send(false, Msg1, StreamState),

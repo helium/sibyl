@@ -243,13 +243,13 @@ process_add_block_event({add_block, BlockHash, _Sync, Ledger}, _State) ->
             %% containing the updates vars
             %% TODO: replace the txn monitoring with the chain var hooks
             %%       when that gets integrated
-            ok = check_for_chain_var_updates(Block, BlockHeight);
+            ok = check_for_chain_var_updates(Block);
         _ ->
             %% err what?
             ok
     end.
 
-check_for_chain_var_updates(Block, BlockHeight) ->
+check_for_chain_var_updates(Block) ->
     Txns = blockchain_block:transactions(Block),
     FilteredTxns = lists:filter(
         fun(Txn) -> blockchain_txn:type(Txn) == blockchain_txn_vars_v1 end,
@@ -271,7 +271,6 @@ check_for_chain_var_updates(Block, BlockHeight) ->
             %% all subscribed clients will get the same msg payload
             Notification = sibyl_utils:encode_gateway_resp_v1(
                 #gateway_config_update_streamed_resp_v1_pb{keys = UpdatedKeysPB},
-                BlockHeight,
                 sibyl_mgr:sigfun()
             ),
             Topic = sibyl_utils:make_config_update_topic(),
@@ -290,9 +289,11 @@ update_validator_cache(Ledger) ->
             validators,
             fun({Addr, BinVal}, Acc) ->
                 Validator = blockchain_ledger_validator_v1:deserialize(BinVal),
-                case (blockchain_ledger_validator_v1:last_heartbeat(Validator) +
-                        HBInterval + HBGrace)
-                            >= CurHeight of
+                case
+                    (blockchain_ledger_validator_v1:last_heartbeat(Validator) +
+                        HBInterval + HBGrace) >=
+                        CurHeight
+                of
                     true ->
                         case get_validator_routing(Addr) of
                             {ok, URI} ->

@@ -56,7 +56,6 @@ is_active_sc(
     #gateway_sc_is_active_req_v1_pb{sc_id = SCID, sc_owner = SCOwner} = _Message
 ) ->
     lager:info("executing RPC is_active with msg ~p", [_Message]),
-    {ok, CurHeight} = get_height(),
     Response0 = #gateway_sc_is_active_resp_v1_pb{
         active = check_is_active_sc(SCID, SCOwner, Chain),
         sc_id = SCID,
@@ -64,7 +63,6 @@ is_active_sc(
     },
     Response1 = sibyl_utils:encode_gateway_resp_v1(
         Response0,
-        CurHeight,
         sibyl_mgr:sigfun()
     ),
     {ok, Response1, Ctx}.
@@ -84,7 +82,6 @@ is_overpaid_sc(
         _Message
 ) ->
     lager:info("executing RPC is_overpaid with msg ~p", [_Message]),
-    {ok, CurHeight} = get_height(),
     Response0 = #gateway_sc_is_overpaid_resp_v1_pb{
         overpaid = check_is_overpaid_sc(SCID, SCOwner, TotalDCs, Chain),
         sc_id = SCID,
@@ -92,7 +89,6 @@ is_overpaid_sc(
     },
     Response1 = sibyl_utils:encode_gateway_resp_v1(
         Response0,
-        CurHeight,
         sibyl_mgr:sigfun()
     ),
     {ok, Response1, Ctx}.
@@ -112,11 +108,9 @@ close_sc(_Chain, Ctx, #gateway_sc_close_req_v1_pb{close_txn = CloseTxn} = _Messa
     SC = blockchain_txn_state_channel_close_v1:state_channel(CloseTxn),
     SCID = blockchain_state_channel_v1:id(SC),
     ok = blockchain_worker:submit_txn(CloseTxn),
-    {ok, CurHeight} = get_height(),
     Response0 = #gateway_sc_close_resp_v1_pb{sc_id = SCID, response = <<"ok">>},
     Response1 = sibyl_utils:encode_gateway_resp_v1(
         Response0,
-        CurHeight,
         sibyl_mgr:sigfun()
     ),
     {ok, Response1, Ctx}.
@@ -159,9 +153,3 @@ get_ledger_state_channel(SCID, Owner, Ledger) ->
         {ok, Mod, SC} -> {ok, Mod, SC};
         _ -> {error, inactive_sc}
     end.
-
--spec get_height() -> {ok, non_neg_integer()}.
-get_height() ->
-    Chain = sibyl_mgr:blockchain(),
-    Ledger = blockchain:ledger(Chain),
-    blockchain_ledger_v1:current_height(Ledger).

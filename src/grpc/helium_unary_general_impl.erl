@@ -67,8 +67,6 @@ address_to_public_uri(
 ) ->
     lager:info("executing RPC address_to_public_uri with msg ~p", [_Message]),
     Chain = sibyl_mgr:blockchain(),
-    Ledger = blockchain:ledger(Chain),
-    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
     RespPB =
         case sibyl_utils:address_data([Address]) of
             [] ->
@@ -84,7 +82,6 @@ address_to_public_uri(
         end,
     Resp = sibyl_utils:encode_gateway_resp_v1(
         RespPB,
-        CurHeight,
         sibyl_mgr:sigfun()
     ),
     {ok, Resp, Ctx}.
@@ -110,7 +107,6 @@ config(
 ) ->
     lager:info("executing RPC config with msg ~p", [Request]),
     Ledger = blockchain:ledger(Chain),
-    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
     NumKeys = length(Keys),
     Response0 =
         case NumKeys > ?MAX_KEY_SIZE of
@@ -148,7 +144,6 @@ config(
 
     Response1 = sibyl_utils:encode_gateway_resp_v1(
         Response0,
-        CurHeight,
         sibyl_mgr:sigfun()
     ),
     {ok, Response1, Ctx}.
@@ -166,15 +161,13 @@ validators(
     lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 validators(
-    Chain,
+    _Chain,
     Ctx,
     #gateway_validators_req_v1_pb{
         quantity = NumVals
     } = Request
 ) ->
     lager:info("executing RPC validators with msg ~p", [Request]),
-    Ledger = blockchain:ledger(Chain),
-    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
     %% get list of current validators from the cache
     %% and then get a random sub set of these with size
     %% equal to NumVals
@@ -188,7 +181,6 @@ validators(
     ],
     Response = sibyl_utils:encode_gateway_resp_v1(
         #gateway_validators_resp_v1_pb{result = EncodedVals},
-        CurHeight,
         sibyl_mgr:sigfun()
     ),
     {ok, Response, Ctx}.
@@ -198,7 +190,9 @@ validators(
 %% ------------------------------------------------------------------
 to_var(Key, undefined) ->
     #blockchain_var_v1_pb{
-        name = Key, type = undefined, value = undefined
+        name = Key,
+        type = undefined,
+        value = undefined
     };
 to_var(Key, V) ->
     blockchain_txn_vars_v1:to_var(Key, V).
