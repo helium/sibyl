@@ -156,6 +156,8 @@ config_test(Config) ->
         result := #{
             msg := {config_resp, ResponseMsg1},
             height := _ResponseHeight1,
+            block_time := _ResponseBlockTime1,
+            block_age := _ResponseBlockAge1,
             signature := _ResponseSig1
         } = Result1
     }} = grpc_client:unary(
@@ -185,6 +187,8 @@ config_test(Config) ->
         result := #{
             msg := {config_resp, ResponseMsg2},
             height := _ResponseHeight2,
+            block_time := _ResponseBlockTime2,
+            block_age := _ResponseBlockAge2,
             signature := _ResponseSig2
         } = Result2
     }} = grpc_client:unary(
@@ -215,6 +219,8 @@ config_test(Config) ->
         result := #{
             msg := {error_resp, ResponseMsg3},
             height := _ResponseHeight3,
+            block_time := _ResponseBlockTime3,
+            block_age := _ResponseBlockAge3,
             signature := _ResponseSig3
         } = Result3
     }} = grpc_client:unary(
@@ -240,6 +246,8 @@ config_test(Config) ->
         result := #{
             msg := {config_resp, ResponseMsg4},
             height := _ResponseHeight4,
+            block_time := _ResponseBlockTime4,
+            block_age := _ResponseBlockAge4,
             signature := _ResponseSig4
         } = Result4
     }} = grpc_client:unary(
@@ -326,7 +334,10 @@ config_update_test(Config) ->
     ok = sibyl_ct_utils:wait_until_local_height(3),
 
     %% confirm we receive a config update with the two new chain vars
-    {data, #{height := _Height0, msg := {config_update_streamed_resp, #{keys := ConfigUpdateMsg0}}}} =
+    {data, #{height := _Height0,
+             block_time := _ResponseBlockTime0,
+             block_age := _ResponseBlockAge0,
+             msg := {config_update_streamed_resp, #{keys := ConfigUpdateMsg0}}}} =
         Data0 = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Data0: ~p", [Data0]),
     ?assertEqual(
@@ -422,6 +433,8 @@ validators_test(Config) ->
         result := #{
             msg := {validators_resp, ResponseMsg1},
             height := _ResponseHeight1,
+            block_time := _ResponseBlockTime1,
+            block_age := _ResponseBlockAge1,
             signature := _ResponseSig1
         } = Result1
     }} = grpc_client:unary(
@@ -453,6 +466,8 @@ validators_test(Config) ->
         result := #{
             msg := {validators_resp, ResponseMsg2},
             height := _ResponseHeight2,
+            block_time := _ResponseBlockTime2,
+            block_age := _ResponseBlockAge2,
             signature := _ResponseSig2
         } = Result2
     }} = grpc_client:unary(
@@ -476,6 +491,8 @@ validators_test(Config) ->
         result := #{
             msg := {validators_resp, ResponseMsg3},
             height := _ResponseHeight3,
+            block_time := _ResponseBlockTime3,
+            block_age := _ResponseBlockAge3,
             signature := _ResponseSig3
         } = Result3
     }} = grpc_client:unary(

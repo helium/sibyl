@@ -2,6 +2,7 @@
 
 -include("../include/sibyl.hrl").
 -include("grpc/autogen/server/gateway_pb.hrl").
+-include_lib("blockchain/include/blockchain.hrl").
 
 -type gateway_resp_type() ::
     gateway_pb:gateway_success_resp_pb()
@@ -158,16 +159,13 @@ ensure(integer_or_default, Value, Default) ->
 ) -> gateway_pb:gateway_resp_v1_pb().
 do_encode_gateway_resp_v1(Msg, SigFun) ->
     Chain = sibyl_mgr:blockchain(),
-    Ledger = blockchain:ledger(Chain),
     %% get data points to include in our attestation
     %% including current height of the validator,
     %% block timestamp & block age
-    {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
-    {ok, HeadBlock} = blockchain:head_block(Chain),
-    BlockTime = blockchain_block_v1:time(HeadBlock),
-    BlockAge = erlang:system_time(seconds) - blockchain_block:time(HeadBlock),
+    {ok, #block_info{time = BlockTime, height = BlockHeight}} = blockchain:head_block_info(Chain),
+    BlockAge = erlang:system_time(seconds) - BlockTime,
     Update = #gateway_resp_v1_pb{
-        height = Height,
+        height = BlockHeight,
         block_time = BlockTime,
         block_age = BlockAge,
         msg = Msg,
