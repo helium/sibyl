@@ -171,7 +171,7 @@ address_data([PubKeyAddress | Rest], Hosts) ->
             lager:debug("address data ~p", [Address]),
             address_data(Rest, [Address | Hosts]);
         {error, _Reason} ->
-            lager:warning("no public ip for router address ~p. Reason ~p", [PubKeyAddress, _Reason]),
+            lager:debug("no public ip for router address ~p. Reason ~p", [PubKeyAddress, _Reason]),
             address_data(Rest, Hosts)
     end.
 
