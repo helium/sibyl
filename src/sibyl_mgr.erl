@@ -167,7 +167,7 @@ handle_info(setup, State) ->
             lager:debug("chain ready, saving chain and sigfun to cache and adding commit hooks"),
             Ledger = blockchain:ledger(Chain),
             ok = blockchain_event:add_handler(self()),
-            {ok, _, SigFun, _} = blockchain_swarm:keys(),
+            {ok, _z, SigFun, _} = blockchain_swarm:keys(),
             {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
             ets:insert(?TID, {?CHAIN, Chain}),
             ets:insert(?TID, {?SIGFUN, SigFun}),

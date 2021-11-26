@@ -57,6 +57,11 @@
     stream_config_update/2
 ]).
 
+%% txn related API
+-export([
+    submit_txn/2,
+    query_txn/2
+]).
 %%%-------------------------------------------------------------------
 %% common API implementations
 %%%-------------------------------------------------------------------
@@ -83,6 +88,23 @@ init(_RPC, StreamState) ->
 handle_info(_RPC, Msg, StreamState) ->
     #{mod := Module} = _HandlerState = grpcbox_stream:stream_handler_state(StreamState),
     Module:handle_info(Msg, StreamState).
+
+%%%-------------------------------------------------------------------
+%% Txn Unary RPC callbacks
+%%%-------------------------------------------------------------------
+-spec submit_txn(
+    ctx:ctx(),
+    gateway_pb:gateway_submit_txn_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+submit_txn(Ctx, Message) ->
+    helium_unary_txn_impl:submit_txn(Ctx, Message).
+
+-spec query_txn(
+    ctx:ctx(),
+    gateway_pb:gateway_query_txn_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+query_txn(Ctx, Message) ->
+    helium_unary_txn_impl:query_txn(Ctx, Message).
 
 %%%-------------------------------------------------------------------
 %% General Unary RPC callbacks

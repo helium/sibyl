@@ -334,10 +334,12 @@ config_update_test(Config) ->
     ok = sibyl_ct_utils:wait_until_local_height(3),
 
     %% confirm we receive a config update with the two new chain vars
-    {data, #{height := _Height0,
-             block_time := _ResponseBlockTime0,
-             block_age := _ResponseBlockAge0,
-             msg := {config_update_streamed_resp, #{keys := ConfigUpdateMsg0}}}} =
+    {data, #{
+        height := _Height0,
+        block_time := _ResponseBlockTime0,
+        block_age := _ResponseBlockAge0,
+        msg := {config_update_streamed_resp, #{keys := ConfigUpdateMsg0}}
+    }} =
         Data0 = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Data0: ~p", [Data0]),
     ?assertEqual(

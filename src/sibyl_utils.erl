@@ -7,6 +7,8 @@
 -type gateway_resp_type() ::
     gateway_pb:gateway_success_resp_pb()
     | gateway_pb:gateway_error_resp_pb()
+    | gateway_pb:gateway_submit_txn_resp_v1_pb()
+    | gateway_pb:gateway_query_txn_resp_v1_pb()
     | gateway_pb:gateway_sc_is_active_resp_v1_pb()
     | gateway_pb:gateway_sc_is_overpaid_resp_v1_pb()
     | gateway_pb:gateway_sc_close_resp_v1_pb()
@@ -53,6 +55,10 @@ make_config_update_topic() ->
     gateway_resp_type(),
     function()
 ) -> gateway_pb:gateway_resp_v1_pb().
+encode_gateway_resp_v1(#gateway_submit_txn_resp_v1_pb{} = Msg, SigFun) ->
+    do_encode_gateway_resp_v1({submit_txn_resp, Msg}, SigFun);
+encode_gateway_resp_v1(#gateway_query_txn_resp_v1_pb{} = Msg, SigFun) ->
+    do_encode_gateway_resp_v1({query_txn_resp, Msg}, SigFun);
 encode_gateway_resp_v1(#gateway_sc_is_active_resp_v1_pb{} = Msg, SigFun) ->
     do_encode_gateway_resp_v1({is_active_resp, Msg}, SigFun);
 encode_gateway_resp_v1(#gateway_sc_is_overpaid_resp_v1_pb{} = Msg, SigFun) ->

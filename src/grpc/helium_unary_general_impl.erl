@@ -75,9 +75,9 @@ address_to_public_uri(
                     details = Address
                 };
             [RoutingAddress] ->
-                #gateway_public_routing_data_resp_v1_pb{
-                    address = Address,
-                    public_uri = RoutingAddress
+                #routing_address_pb{
+                    pub_key = Address,
+                    uri = RoutingAddress
                 }
         end,
     Resp = sibyl_utils:encode_gateway_resp_v1(
