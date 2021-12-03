@@ -111,6 +111,7 @@ init_per_testcase(TestCase, Config) ->
         end
     ),
 
+
     %% setup the grpc connection
     {ok, Connection} = grpc_client:connect(tcp, "localhost", 10001),
 
@@ -149,6 +150,7 @@ submit_test(Config) ->
     ConsensusMembers = ?config(consensus_members, Config),
     [{_Addr, PayerPubKey, PayerSigFun} | _] = ConsensusMembers,
     PayerPubKeyBin = libp2p_crypto:pubkey_to_bin(PayerPubKey),
+    Chain = blockchain_worker:blockchain(),
 
     %% use the txn APIs to submit a new txn
     %% in this case a new route
@@ -183,6 +185,63 @@ submit_test(Config) ->
     ?assertEqual(HttpStatus1, <<"200">>),
     #{key := Txn1Key, validator := Txn1Validator} = ResponseMsg1,
 
+    %% query the txn and check its status
+    {ok, #{
+        headers := Headers2,
+        result := #{
+            msg := {query_txn_resp, ResponseMsg2},
+            height := _ResponseHeight2,
+            block_time := _ResponseBlockTime2,
+            block_age := _ResponseBlockAge2,
+            signature := _ResponseSig2
+        } = Result2
+    }} = grpc_client:unary(
+        Connection,
+        #{key => Txn1Key},
+        'helium.gateway',
+        'query_txn',
+        gateway_client_pb,
+        []
+    ),
+    ct:pal("Response Headers: ~p", [Headers2]),
+    ct:pal("Response Body: ~p", [Result2]),
+    #{<<":status">> := HttpStatus2} = Headers2,
+    ?assertEqual(HttpStatus2, <<"200">>),
+    #{status := pending, details := <<>>, acceptors := [], rejectors := []} = ResponseMsg2,
+
+    %% make a block with the previously submitted txn
+    %% force it to clear
+    %% and then check its status again
+    {ok, Block0} = sibyl_ct_utils:create_block(ConsensusMembers, [SignedOUITxn1]),
+    _ = blockchain_gossip_handler:add_block(Block0, Chain, self(), blockchain_swarm:swarm()),
+    sibyl_ct_utils:wait_until_local_height(2),
+
+    %% requery the txn and check its status
+    {ok, #{
+        headers := Headers3,
+        result := #{
+            msg := {query_txn_resp, ResponseMsg3},
+            height := _ResponseHeight3,
+            block_time := _ResponseBlockTime3,
+            block_age := _ResponseBlockAge3,
+            signature := _ResponseSig3
+        } = Result3
+    }} = grpc_client:unary(
+        Connection,
+        #{key => Txn1Key},
+        'helium.gateway',
+        'query_txn',
+        gateway_client_pb,
+        []
+    ),
+    ct:pal("Response Headers: ~p", [Headers3]),
+    ct:pal("Response Body: ~p", [Result3]),
+    #{<<":status">> := HttpStatus3} = Headers3,
+    ?assertEqual(HttpStatus3, <<"200">>),
+
+    %%TODO: details here represents the block in which the txn clears
+    %% it should NOTE be zero
+    #{status := cleared, details := <<"0">>, acceptors := [], rejectors := []} = ResponseMsg3,
     ok.
 
 %

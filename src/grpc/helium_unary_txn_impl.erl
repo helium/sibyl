@@ -83,14 +83,14 @@ query_txn(
     lager:info("executing RPC query_txn with msg ~p", [_Message]),
     RespPB =
         case blockchain_pending_txn_mgr:get_txn_status(TxnKey) of
-            {ok, cleared, Block} ->
+            {ok, {cleared, Block}} ->
                 #gateway_query_txn_resp_v1_pb{
                     status = cleared,
-                    details = Block,
+                    details = integer_to_binary(Block),
                     acceptors = [],
                     rejectors = []
                 };
-            {ok, failed, Reason} ->
+            {ok, {failed, Reason}} ->
                 #gateway_query_txn_resp_v1_pb{
                     status = failed,
                     details = Reason,

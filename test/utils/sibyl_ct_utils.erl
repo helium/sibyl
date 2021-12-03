@@ -32,6 +32,7 @@
     destroy_ledger/0,
     add_and_gossip_fake_blocks/6,
     local_add_and_gossip_fake_blocks/5,
+    local_add_and_gossip_fake_blocks/6,
     add_block/4,
     create_oui_txn/4,
     setup_meck_txn_forwarding/2,
@@ -847,11 +848,13 @@ add_and_gossip_fake_blocks(NumFakeBlocks, ConsensusMembers, Node, Swarm, Chain, 
         end,
         lists:seq(1, NumFakeBlocks)
     ).
-
 local_add_and_gossip_fake_blocks(NumFakeBlocks, ConsensusMembers, Swarm, Chain, From) ->
+    local_add_and_gossip_fake_blocks(NumFakeBlocks, ConsensusMembers, Swarm, Chain, From, []).
+
+local_add_and_gossip_fake_blocks(NumFakeBlocks, ConsensusMembers, Swarm, Chain, From, Txns) ->
     lists:foreach(
         fun(_) ->
-            {ok, B} = sibyl_ct_utils:create_block(ConsensusMembers, []),
+            {ok, B} = sibyl_ct_utils:create_block(ConsensusMembers, Txns),
             _ = blockchain_gossip_handler:add_block(B, Chain, From, Swarm),
             timer:sleep(50)
         end,
