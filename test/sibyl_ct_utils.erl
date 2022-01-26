@@ -78,7 +78,7 @@ pmap(F, L) ->
         receive
             {pmap, N, R} -> {N, R}
         end
-        || _ <- L
+     || _ <- L
     ],
     {_, L3} = lists:unzip(lists:keysort(1, L2)),
     L3.
@@ -535,7 +535,7 @@ initialize_nodes(Config) ->
             h3:from_geo({37.780586, -122.469470}, 13),
             0
         )
-        || Addr <- Addrs
+     || Addr <- Addrs
     ],
 
     Txs = InitialVars ++ GenPaymentTxs ++ GenDCsTxs ++ GenGwTxns ++ [GenConsensusGroupTx],
@@ -812,7 +812,7 @@ create_oui_txn(OUI, RouterNode, EUIs, SubnetSize) ->
         xor16:new(
             [
                 <<DevEUI:64/integer-unsigned-little, AppEUI:64/integer-unsigned-little>>
-                || {DevEUI, AppEUI} <- EUIs
+             || {DevEUI, AppEUI} <- EUIs
             ],
             fun xxhash:hash64/1
         )

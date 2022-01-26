@@ -16,6 +16,7 @@
 -behavior(helium_gateway_bhvr).
 
 -include("../grpc/autogen/server/gateway_pb.hrl").
+-include_lib("helium_proto/include/blockchain_txn_pb.hrl").
 
 %% common APIs
 -export([
@@ -45,6 +46,11 @@
     is_overpaid_sc/2,
     close_sc/2,
     follow_sc/2
+]).
+
+-export([
+    submit_txn/2,
+    query_txn/2
 ]).
 
 %%%-------------------------------------------------------------------
@@ -89,6 +95,13 @@ init(_RPC = is_active_sc, StreamState) ->
 init(_RPC = is_overpaid_sc, StreamState) ->
     StreamState;
 init(_RPC = close_sc, StreamState) ->
+    StreamState;
+%%
+%% txn related unary APIs
+%%
+init(_RPC = submit_txn, StreamState) ->
+    StreamState;
+init(_RPC = query_txn, StreamState) ->
     StreamState.
 
 %%
@@ -111,6 +124,10 @@ handle_info(_RPC = close_sc, Msg, StreamState) ->
     helium_state_channels_impl:handle_info(Msg, StreamState);
 handle_info(_RPC = follow_sc, Msg, StreamState) ->
     helium_state_channels_impl:handle_info(Msg, StreamState);
+handle_info(_RPC = submit_txn, Msg, StreamState) ->
+    helium_txn_impl:handle_info(Msg, StreamState);
+handle_info(_RPC = query_txn, Msg, StreamState) ->
+    helium_txn_impl:handle_info(Msg, StreamState);
 handle_info(_RPC, _Msg, StreamState) ->
     lager:warning("got unhandled info msg, RPC ~p, Msg, ~p", [_RPC, _Msg]),
     StreamState.
@@ -169,3 +186,20 @@ close_sc(Ctx, Message) -> helium_state_channels_impl:close_sc(Ctx, Message).
     grpcbox_stream:t()
 ) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
 follow_sc(Msg, StreamState) -> helium_state_channels_impl:follow_sc(Msg, StreamState).
+
+%%%-------------------------------------------------------------------
+%% Txn Unary RPC implementations
+%%%-------------------------------------------------------------------
+-spec submit_txn(
+    ctx:ctx(),
+    gateway_pb:gateway_submit_txn_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+submit_txn(Ctx, Message) ->
+    helium_txn_impl:submit_txn(Ctx, Message).
+
+-spec query_txn(
+    ctx:ctx(),
+    gateway_pb:gateway_query_txn_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+query_txn(Ctx, Message) ->
+    helium_txn_impl:query_txn(Ctx, Message).

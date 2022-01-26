@@ -10,7 +10,9 @@
     | gateway_pb:gateway_routing_streamed_resp_v1_pb()
     | gateway_pb:gateway_config_resp_v1_pb()
     | gateway_pb:gateway_config_update_streamed_resp_v1_pb()
-    | gateway_pb:gateway_validators_resp_v1_pb().
+    | gateway_pb:gateway_validators_resp_v1_pb()
+    | gateway_pb:gateway_submit_txn_resp_v1_pb()
+    | gateway_pb:gateway_query_txn_resp_v1_pb().
 
 %% API
 -export([
@@ -42,6 +44,10 @@ make_config_update_topic() ->
     gateway_resp_type(),
     function()
 ) -> gateway_pb:gateway_resp_v1_pb().
+encode_gateway_resp_v1(#gateway_submit_txn_resp_v1_pb{} = Msg, SigFun) ->
+    do_encode_gateway_resp_v1({submit_txn_resp, Msg}, SigFun);
+encode_gateway_resp_v1(#gateway_query_txn_resp_v1_pb{} = Msg, SigFun) ->
+    do_encode_gateway_resp_v1({query_txn_resp, Msg}, SigFun);
 encode_gateway_resp_v1(#gateway_validators_resp_v1_pb{} = Msg, SigFun) ->
     do_encode_gateway_resp_v1({validators_resp, Msg}, SigFun);
 encode_gateway_resp_v1(#gateway_config_resp_v1_pb{} = Msg, SigFun) ->
