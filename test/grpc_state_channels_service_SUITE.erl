@@ -319,8 +319,8 @@ is_active_sc_test(Config) ->
         result := #{
             msg := {is_active_resp, ResponseMsg2},
             height := _ResponseHeight2,
-            block_time := _ResponseBlockHeight,
-            block_age := _ResponseBlockAge,
+            block_time := _ResponseBlockHeight2,
+            block_age := _ResponseBlockAge2,
             signature := _ResponseSig2
         } = Result2
     }} = grpc_client:unary(
@@ -449,8 +449,8 @@ is_overpaid_sc_test(Config) ->
         result := #{
             msg := {is_overpaid_resp, ResponseMsg2},
             height := _ResponseHeight2,
-            block_time := _ResponseBlockHeight,
-            block_age := _ResponseBlockAge,
+            block_time := _ResponseBlockHeight2,
+            block_age := _ResponseBlockAge2,
             signature := _ResponseSig2
         } = Result2
     }} = grpc_client:unary(
@@ -909,11 +909,11 @@ check_all_closed(IDs) ->
         {txn, Txn} ->
             check_all_closed([
                 ID
-                || ID <- IDs,
-                   ID /=
-                       blockchain_state_channel_v1:id(
-                           blockchain_txn_state_channel_close_v1:state_channel(Txn)
-                       )
+             || ID <- IDs,
+                ID /=
+                    blockchain_state_channel_v1:id(
+                        blockchain_txn_state_channel_close_v1:state_channel(Txn)
+                    )
             ])
     after 10000 -> ct:fail("still unclosed ~p", [IDs])
     end.

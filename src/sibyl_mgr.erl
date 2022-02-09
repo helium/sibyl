@@ -243,12 +243,18 @@ process_add_block_event({add_block, BlockHash, _Sync, Ledger}, _State) ->
             %% containing the updates vars
             %% TODO: replace the txn monitoring with the chain var hooks
             %%       when that gets integrated
-            ok = check_for_chain_var_updates(Block);
+            ok = check_for_chain_var_updates(Block),
+
+            %% check if there are any assert v2 txns in the block
+            %% for each publish a notification to subsribed clients
+            %% containing the Addr of the updated GW
+            ok = check_for_asserts(Block);
         _ ->
             %% err what?
             ok
     end.
 
+-spec check_for_chain_var_updates(blockchain_block_v1:block()) -> ok.
 check_for_chain_var_updates(Block) ->
     Txns = blockchain_block:transactions(Block),
     FilteredTxns = lists:filter(
@@ -272,6 +278,30 @@ check_for_chain_var_updates(Block) ->
     Topic = sibyl_utils:make_config_update_topic(),
     sibyl_bus:pub(Topic, {config_update_notify, Notification}),
     lager:info("notifying clients of chain var updates: ~p", [UpdatedKeysPB]),
+    ok.
+
+-spec check_for_asserts(blockchain_block_v1:block()) -> ok.
+check_for_asserts(Block) ->
+    Txns = blockchain_block:transactions(Block),
+    FilteredTxns = lists:filter(
+        fun(Txn) ->
+            Asserts = [blockchain_txn_assert_location_v1, blockchain_txn_assert_location_v2],
+            lists:member(blockchain_txn:type(Txn), Asserts)
+        end,
+        Txns
+    ),
+    lists:foreach(
+        fun(AssertTxn) ->
+            %% for each asserted GW, fire an event
+            %% and allow consumers to do any needful
+            Type = blockchain_txn:type(AssertTxn),
+            GWAddr = Type:gateway(AssertTxn),
+            Topic = sibyl_utils:make_asserted_gw_topic(GWAddr),
+            lager:info("notifying clients of assert for gw ~p", [GWAddr]),
+            sibyl_bus:pub(Topic, {asserted_gw_notify, GWAddr})
+        end,
+        FilteredTxns
+    ),
     ok.
 
 -spec update_validator_cache(Ledger :: blockchain_ledger_v1:ledger()) -> ok.
@@ -306,6 +336,7 @@ update_validator_cache(Ledger) ->
     _ = ets:insert(?TID, {?VALIDATORS, Vals}),
     ok.
 
+-spec get_validator_routing(libp2p_crypto:pubkey_bin()) -> {error, any()} | {ok, binary()}.
 get_validator_routing(Addr) ->
     case sibyl_utils:address_data([Addr]) of
         [] ->

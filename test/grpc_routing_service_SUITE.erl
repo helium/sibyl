@@ -117,7 +117,7 @@ init_per_testcase(TestCase, Config) ->
 
     OUI1 = 1,
     Addresses0 = [libp2p_swarm:pubkey_bin(Swarm)],
-    {Filter, _} = xor16:to_bin(xor16:new([], fun xxhash:hash64/1)),
+    {Filter, _} = xor16:to_bin(xor16:new([0], fun xxhash:hash64/1)),
     OUITxn0 = blockchain_txn_oui_v1:new(OUI1, PayerPubKeyBin, Addresses0, Filter, 8),
     SignedOUITxn0 = blockchain_txn_oui_v1:sign(OUITxn0, PayerSigFun),
 
@@ -258,7 +258,7 @@ routing_updates_with_initial_msg_test(Config) ->
     OUI2 = 2,
     #{public := PubKey2, secret := _PrivKey2} = libp2p_crypto:generate_keys(ed25519),
     Addresses2 = [libp2p_crypto:pubkey_to_bin(PubKey2)],
-    {Filter2, _} = xor16:to_bin(xor16:new([], fun xxhash:hash64/1)),
+    {Filter2, _} = xor16:to_bin(xor16:new([0], fun xxhash:hash64/1)),
     OUITxn2 = blockchain_txn_oui_v1:new(OUI2, Payer, Addresses2, Filter2, 8),
     SignedOUITxn2 = blockchain_txn_oui_v1:sign(OUITxn2, SigFun),
     {ok, Block2} = sibyl_ct_utils:create_block(ConsensusMembers, [SignedOUITxn2]),

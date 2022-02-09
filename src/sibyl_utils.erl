@@ -10,6 +10,7 @@
     | gateway_pb:gateway_routing_streamed_resp_v1_pb()
     | gateway_pb:gateway_config_resp_v1_pb()
     | gateway_pb:gateway_config_update_streamed_resp_v1_pb()
+    | gateway_pb:gateway_region_params_streamed_resp_v1_pb()
     | gateway_pb:gateway_validators_resp_v1_pb().
 
 %% API
@@ -18,10 +19,12 @@
     make_event/2,
     make_sc_topic/1,
     make_config_update_topic/0,
+    make_asserted_gw_topic/1,
     encode_gateway_resp_v1/2,
     to_routing_pb/1,
     ensure/2,
-    ensure/3
+    ensure/3,
+    address_data/1
 ]).
 
 -spec make_event(binary()) -> sibyl_mgr:event().
@@ -38,10 +41,15 @@ make_sc_topic(SCID) ->
 make_config_update_topic() ->
     <<?EVENT_CONFIG_UPDATE_NOTIFICATION/binary>>.
 
+make_asserted_gw_topic(Addr) ->
+    <<?EVENT_ASSERTED_GW_NOTIFICATION/binary, Addr/binary>>.
+
 -spec encode_gateway_resp_v1(
     gateway_resp_type(),
     function()
 ) -> gateway_pb:gateway_resp_v1_pb().
+encode_gateway_resp_v1(#gateway_region_params_streamed_resp_v1_pb{} = Msg, SigFun) ->
+    do_encode_gateway_resp_v1({region_params_streamed_resp, Msg}, SigFun);
 encode_gateway_resp_v1(#gateway_validators_resp_v1_pb{} = Msg, SigFun) ->
     do_encode_gateway_resp_v1({validators_resp, Msg}, SigFun);
 encode_gateway_resp_v1(#gateway_config_resp_v1_pb{} = Msg, SigFun) ->
