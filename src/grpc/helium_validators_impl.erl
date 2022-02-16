@@ -57,7 +57,7 @@ validators(
     lager:info("randomly selected validators: ~p", [SelectedVals]),
     EncodedVals = [
         #routing_address_pb{pub_key = Addr, uri = Routing}
-        || {Addr, Routing} <- SelectedVals
+     || {Addr, Routing} <- SelectedVals
     ],
     Response = sibyl_utils:encode_gateway_resp_v1(
         #gateway_validators_resp_v1_pb{result = EncodedVals},

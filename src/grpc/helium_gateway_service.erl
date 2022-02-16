@@ -23,6 +23,11 @@
     handle_info/3
 ]).
 
+%% region params APIs
+-export([
+    region_params_update/2
+]).
+
 %% config APIs
 -export([
     config/2,
@@ -56,6 +61,7 @@
 %% unary APIs only need to return the same passed in StreamState
 
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
+
 %%
 %% validators unary APIs
 %%
@@ -66,6 +72,11 @@ init(_RPC = validators, StreamState) ->
 %%
 init(_RPC = config, StreamState) ->
     StreamState;
+%%
+%% region params streaming APIs
+%%
+init(RPC = region_params_update, StreamState) ->
+    helium_region_params_impl:init(RPC, StreamState);
 %%
 %% config streaming APIs
 %%
@@ -92,23 +103,16 @@ init(_RPC = close_sc, StreamState) ->
     StreamState.
 
 %%
-%% Any API can potentially handle info msgs
+%% Any API can potentially handle info msgs but really its only
+%% gonna be streaming APIs
 %%
 -spec handle_info(atom(), any(), grpcbox_stream:t()) -> grpcbox_stream:t().
-handle_info(_RPC = validators, Msg, StreamState) ->
-    helium_validators_impl:handle_info(Msg, StreamState);
-handle_info(_RPC = config, Msg, StreamState) ->
-    helium_config_impl:handle_info(Msg, StreamState);
+handle_info(_RPC = region_params_update, Msg, StreamState) ->
+    helium_region_params_impl:handle_info(Msg, StreamState);
 handle_info(_RPC = config_update, Msg, StreamState) ->
     helium_config_impl:handle_info(Msg, StreamState);
 handle_info(_RPC = routing, Msg, StreamState) ->
     helium_routing_impl:handle_info(Msg, StreamState);
-handle_info(_RPC = is_active_sc, Msg, StreamState) ->
-    helium_state_channels_impl:handle_info(Msg, StreamState);
-handle_info(_RPC = is_overpaid_sc, Msg, StreamState) ->
-    helium_state_channels_impl:handle_info(Msg, StreamState);
-handle_info(_RPC = close_sc, Msg, StreamState) ->
-    helium_state_channels_impl:handle_info(Msg, StreamState);
 handle_info(_RPC = follow_sc, Msg, StreamState) ->
     helium_state_channels_impl:handle_info(Msg, StreamState);
 handle_info(_RPC, _Msg, StreamState) ->
@@ -116,7 +120,16 @@ handle_info(_RPC, _Msg, StreamState) ->
     StreamState.
 
 %%%-------------------------------------------------------------------
-%% Config RPC implementations
+%% Region params RPC implementations
+%%%-------------------------------------------------------------------
+-spec region_params_update(
+    gateway_pb:gateway_region_params_update_req_v1_pb(),
+    grpcbox_stream:t()
+) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
+region_params_update(Msg, StreamState) ->
+    helium_region_params_impl:region_params_update(Msg, StreamState).
+%%%-------------------------------------------------------------------
+%% Validators RPC implementations
 %%%-------------------------------------------------------------------
 -spec validators(
     ctx:ctx(),
@@ -124,6 +137,9 @@ handle_info(_RPC, _Msg, StreamState) ->
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
 validators(Ctx, Message) -> helium_validators_impl:validators(Ctx, Message).
 
+%%%-------------------------------------------------------------------
+%% Config RPC implementations
+%%%-------------------------------------------------------------------
 -spec config(
     ctx:ctx(),
     gateway_pb:gateway_config_req_v1_pb()

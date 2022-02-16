@@ -168,7 +168,7 @@ validators_test(Config) ->
             ?bones(10000),
             ?bones(5)
         )
-        || {StakePubkeyBin, {_StakePub, _StakePriv, _StakeSigFun}} <- Keys
+     || {StakePubkeyBin, {_StakePub, _StakePriv, _StakeSigFun}} <- Keys
     ],
     SignedTxns = [blockchain_txn_stake_validator_v1:sign(Txn, OwnerSigFun) || Txn <- Txns],
 
