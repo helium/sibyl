@@ -9,179 +9,191 @@
 %% rather than combining the server side implementations into one
 %% single module, this top level module was added instead and simply
 %% routes incoming RPCs to their service specific module
-%% this was we can maintain functional seperation of concerns
+%% this way we can maintain functional seperation of concerns
 %%%-------------------------------------------------------------------
 -module(helium_gateway_service).
 
 -behavior(helium_gateway_bhvr).
 
 -include("../grpc/autogen/server/gateway_pb.hrl").
+-include("sibyl.hrl").
 
-%% common APIs
+%% streaming behaviour APIs
 -export([
     init/2,
     handle_info/3
 ]).
 
-%% region params APIs
+%% general unary APIs
 -export([
-    region_params_update/2
-]).
-
-%% config APIs
--export([
+    address_to_public_uri/2,
     config/2,
-    config_update/2
-]).
-
-%% validators APIs
--export([
     validators/2
 ]).
 
-%% routing APIs
--export([
-    routing/2
-]).
+%% routing unary APIs
+-export([]).
 
-%% state channel related APIs
+%% state channel unary APIs
 -export([
     is_active_sc/2,
     is_overpaid_sc/2,
-    close_sc/2,
-    follow_sc/2
+    close_sc/2
+]).
+
+%% poc unary PIs
+-export([
+    check_challenge_target/2,
+    send_report/2,
+    poc_key_to_public_uri/2
+]).
+
+%% streaming APIs
+-export([
+    follow_sc/2,
+    config_update/2,
+    routing/2,
+    stream_poc/2,
+    region_params_update/2
 ]).
 
 %%%-------------------------------------------------------------------
 %% common API implementations
 %%%-------------------------------------------------------------------
 
-%% its really only stream RPCs which need to handle the init
-%% as its those which are likely to manage their own state
-%% unary APIs only need to return the same passed in StreamState
+%%
+%% Streaming RPC init grpcbox callback
+%%
 
--spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
-
-%%
-%% validators unary APIs
-%%
-init(_RPC = validators, StreamState) ->
-    StreamState;
-%%
-%% config unary APIs
-%%
-init(_RPC = config, StreamState) ->
-    StreamState;
-%%
-%% region params streaming APIs
-%%
-init(RPC = region_params_update, StreamState) ->
-    helium_region_params_impl:init(RPC, StreamState);
-%%
-%% config streaming APIs
-%%
-init(RPC = config_update, StreamState) ->
-    helium_config_impl:init(RPC, StreamState);
-%%
-%% routing streaming APIs
-%%
-init(RPC = routing, StreamState) ->
-    helium_routing_impl:init(RPC, StreamState);
-%%
-%% state channel streaming APIs
-%%
-init(RPC = follow_sc, StreamState) ->
-    helium_state_channels_impl:init(RPC, StreamState);
-%%
-%% state channel unary APIs
-%%
-init(_RPC = is_active_sc, StreamState) ->
-    StreamState;
-init(_RPC = is_overpaid_sc, StreamState) ->
-    StreamState;
-init(_RPC = close_sc, StreamState) ->
+%% todo update to use stream_ prefix convention, requires gateway rs update
+init(follow_sc = RPC, StreamState) ->
+    helium_stream_sc_follow_impl:init(RPC, StreamState);
+init(routing = RPC, StreamState) ->
+    helium_stream_routing_impl:init(RPC, StreamState);
+init(stream_poc = RPC, StreamState) ->
+    helium_stream_poc_impl:init(RPC, StreamState);
+%% todo update to use stream_ prefix convention, requires gateway rs update
+init(config_update = RPC, StreamState) ->
+    helium_stream_config_update_impl:init(RPC, StreamState);
+%% todo update to use stream_ prefix convention, requires gateway rs update
+init(region_params_update = RPC, StreamState) ->
+    helium_stream_region_params_update_impl:init(RPC, StreamState);
+init(_RPC, StreamState) ->
     StreamState.
 
 %%
-%% Any API can potentially handle info msgs but really its only
-%% gonna be streaming APIs
+%% Streaming RPC handle info callback
+%% Stream must have been initialized first via call to init above
 %%
 -spec handle_info(atom(), any(), grpcbox_stream:t()) -> grpcbox_stream:t().
-handle_info(_RPC = region_params_update, Msg, StreamState) ->
-    helium_region_params_impl:handle_info(Msg, StreamState);
-handle_info(_RPC = config_update, Msg, StreamState) ->
-    helium_config_impl:handle_info(Msg, StreamState);
-handle_info(_RPC = routing, Msg, StreamState) ->
-    helium_routing_impl:handle_info(Msg, StreamState);
-handle_info(_RPC = follow_sc, Msg, StreamState) ->
-    helium_state_channels_impl:handle_info(Msg, StreamState);
-handle_info(_RPC, _Msg, StreamState) ->
-    lager:warning("got unhandled info msg, RPC ~p, Msg, ~p", [_RPC, _Msg]),
-    StreamState.
+handle_info(_RPC, Msg, StreamState) ->
+    #{mod := Module} = _HandlerState = grpcbox_stream:stream_handler_state(StreamState),
+    Module:handle_info(Msg, StreamState).
 
 %%%-------------------------------------------------------------------
-%% Region params RPC implementations
+%% General Unary RPC callbacks
 %%%-------------------------------------------------------------------
--spec region_params_update(
-    gateway_pb:gateway_region_params_update_req_v1_pb(),
-    grpcbox_stream:t()
-) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
-region_params_update(Msg, StreamState) ->
-    helium_region_params_impl:region_params_update(Msg, StreamState).
-%%%-------------------------------------------------------------------
-%% Validators RPC implementations
-%%%-------------------------------------------------------------------
--spec validators(
+-spec address_to_public_uri(
     ctx:ctx(),
-    gateway_pb:gateway_validators_req_v1_pb()
+    gateway_pb:gateway_address_routing_data_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
-validators(Ctx, Message) -> helium_validators_impl:validators(Ctx, Message).
+address_to_public_uri(Ctx, Message) ->
+    helium_unary_general_impl:address_to_public_uri(Ctx, Message).
 
-%%%-------------------------------------------------------------------
-%% Config RPC implementations
-%%%-------------------------------------------------------------------
 -spec config(
     ctx:ctx(),
     gateway_pb:gateway_config_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
-config(Ctx, Message) -> helium_config_impl:config(Ctx, Message).
+config(Ctx, Message) -> helium_unary_general_impl:config(Ctx, Message).
 
--spec config_update(
-    gateway_pb:gateway_config_update_req_v1_pb(),
-    grpcbox_stream:t()
-) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
-config_update(Msg, StreamState) -> helium_config_impl:config_update(Msg, StreamState).
-
-%%%-------------------------------------------------------------------
-%% Routing RPC implementations
-%%%-------------------------------------------------------------------
--spec routing(gateway_pb:gateway_routing_req_v1_pb(), grpcbox_stream:t()) ->
-    {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
-routing(Msg, StreamState) -> helium_routing_impl:routing(Msg, StreamState).
+-spec validators(
+    ctx:ctx(),
+    gateway_pb:gateway_validators_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+validators(Ctx, Message) -> helium_unary_general_impl:validators(Ctx, Message).
 
 %%%-------------------------------------------------------------------
-%% State channel RPC implementations
+%% Routing Unary RPC callbacks
+%%%-------------------------------------------------------------------
+
+%% none
+
+%%%-------------------------------------------------------------------
+%% State channel Unary RPC callbacks
 %%%-------------------------------------------------------------------
 -spec is_active_sc(
     ctx:ctx(),
     gateway_pb:gateway_sc_is_active_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
-is_active_sc(Ctx, Message) -> helium_state_channels_impl:is_active_sc(Ctx, Message).
+is_active_sc(Ctx, Message) -> helium_unary_state_channels_impl:is_active_sc(Ctx, Message).
 
 -spec is_overpaid_sc(
     ctx:ctx(),
     gateway_pb:gateway_sc_is_overpaid_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
-is_overpaid_sc(Ctx, Message) -> helium_state_channels_impl:is_overpaid_sc(Ctx, Message).
+is_overpaid_sc(Ctx, Message) -> helium_unary_state_channels_impl:is_overpaid_sc(Ctx, Message).
 
 -spec close_sc(
     ctx:ctx(),
     gateway_pb:gateway_sc_close_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()}.
-close_sc(Ctx, Message) -> helium_state_channels_impl:close_sc(Ctx, Message).
+close_sc(Ctx, Message) -> helium_unary_state_channels_impl:close_sc(Ctx, Message).
 
+%%%-------------------------------------------------------------------
+%% PoCs Unary RPC callbacks
+%%%-------------------------------------------------------------------
+-spec check_challenge_target(
+    ctx:ctx(),
+    gateway_pb:gateway_poc_check_challenge_target_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+check_challenge_target(Ctx, Message) ->
+    helium_unary_poc_impl:check_challenge_target(Ctx, Message).
+
+-spec send_report(
+    ctx:ctx(),
+    gateway_pb:gateway_poc_report_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+send_report(Ctx, Message) ->
+    helium_unary_poc_impl:send_report(Ctx, Message).
+
+-spec poc_key_to_public_uri(
+    ctx:ctx(),
+    gateway_pb:gateway_poc_key_routing_data_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+poc_key_to_public_uri(Ctx, Message) ->
+    helium_unary_poc_impl:poc_key_to_public_uri(Ctx, Message).
+
+%%%-------------------------------------------------------------------
+%% Streaming RPC callbacks
+%%%-------------------------------------------------------------------
 -spec follow_sc(
-    gateway_pb:gateway_sc_follow_req_v1(),
+    gateway_pb:gateway_sc_follow_req_v1_pb(),
     grpcbox_stream:t()
 ) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
-follow_sc(Msg, StreamState) -> helium_state_channels_impl:follow_sc(Msg, StreamState).
+follow_sc(Msg, StreamState) -> helium_stream_sc_follow_impl:follow_sc(Msg, StreamState).
+
+-spec routing(
+    gateway_pb:gateway_routing_req_v1_pb(),
+    grpcbox_stream:t()
+) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
+routing(Msg, StreamState) -> helium_stream_routing_impl:routing(Msg, StreamState).
+
+-spec stream_poc(
+    gateway_pb:gateway_poc_req_v1_pb(),
+    grpcbox_stream:t()
+) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
+stream_poc(Msg, StreamState) -> helium_stream_poc_impl:pocs(Msg, StreamState).
+
+-spec config_update(
+    gateway_pb:gateway_config_update_req_v1_pb(),
+    grpcbox_stream:t()
+) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
+config_update(Msg, StreamState) ->
+    helium_stream_config_update_impl:config_update(Msg, StreamState).
+
+-spec region_params_update(
+    gateway_pb:gateway_region_params_update_req_v1_pb(),
+    grpcbox_stream:t()
+) -> {ok, grpcbox_stream:t()} | grpcbox_stream:grpc_error_response().
+region_params_update(Msg, StreamState) ->
+    helium_stream_region_params_update_impl:region_params_update(Msg, StreamState).
