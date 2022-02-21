@@ -117,7 +117,7 @@ init_per_testcase(TestCase, Config) ->
 
     OUI1 = 1,
     Addresses0 = [libp2p_swarm:pubkey_bin(Swarm)],
-    {Filter, _} = xor16:to_bin(xor16:new([], fun xxhash:hash64/1)),
+    {Filter, _} = xor16:to_bin(xor16:new([0], fun xxhash:hash64/1)),
     OUITxn0 = blockchain_txn_oui_v1:new(OUI1, PayerPubKeyBin, Addresses0, Filter, 8),
     SignedOUITxn0 = blockchain_txn_oui_v1:sign(OUITxn0, PayerSigFun),
 
@@ -194,6 +194,7 @@ routing_updates_with_initial_msg_test(Config) ->
     Connection = ?config(grpc_connection, Config),
     Stream = ?config(grpc_stream, Config),
     OUI1 = ?config(oui1, Config),
+    LocalSwarm = blockchain_swarm:swarm(),
 
     %% send the initial msg from the client with its safe height value
     grpc_client:send(Stream, #{height => 1}),
@@ -257,7 +258,7 @@ routing_updates_with_initial_msg_test(Config) ->
     OUI2 = 2,
     #{public := PubKey2, secret := _PrivKey2} = libp2p_crypto:generate_keys(ed25519),
     Addresses2 = [libp2p_crypto:pubkey_to_bin(PubKey2)],
-    {Filter2, _} = xor16:to_bin(xor16:new([], fun xxhash:hash64/1)),
+    {Filter2, _} = xor16:to_bin(xor16:new([0], fun xxhash:hash64/1)),
     OUITxn2 = blockchain_txn_oui_v1:new(OUI2, Payer, Addresses2, Filter2, 8),
     SignedOUITxn2 = blockchain_txn_oui_v1:sign(OUITxn2, SigFun),
     {ok, Block2} = sibyl_ct_utils:create_block(ConsensusMembers, [SignedOUITxn2]),
@@ -272,6 +273,17 @@ routing_updates_with_initial_msg_test(Config) ->
     {data, Routes2} = grpc_client:rcv(Stream, 5000),
     ct:pal("Route Update: ~p", [Routes2]),
     assert_route_update(Routes2, ExpRoutes2),
+
+    %% wait a bunch of blocks and confirm we dont get any unexpected / stray updates
+    ok = sibyl_ct_utils:local_add_and_gossip_fake_blocks(
+        7,
+        ConsensusMembers,
+        LocalSwarm,
+        Chain,
+        self()
+    ),
+    ok = sibyl_ct_utils:wait_until_local_height(11),
+    empty = grpc_client:get(Stream),
 
     grpc_client:stop_stream(Stream),
     grpc_client:stop_connection(Connection),
@@ -291,9 +303,10 @@ routing_updates_without_initial_msg_test(Config) ->
     %% get current height and add 1 and use for client header
     {ok, CurHeight0} = blockchain:height(Chain),
     ClientHeaderHeight = CurHeight0 + 1,
+    ct:pal("ClientHeaderHeight: ~p", [ClientHeaderHeight]),
 
     %% the stream requires an empty msg to be sent in order to initialise the service
-    grpc_client:send(Stream, #{height => ClientHeaderHeight}),
+    grpc_client:send(Stream, #{height => 3}),
 
     %% we do not expect to receive a response containing all the added routes from the init_per_testcase step
     %% this is because the client supplied a height value greater than the height at which routes were last modified
@@ -351,6 +364,8 @@ assert_route_update(
     #{
         msg := {routing_streamed_resp, ResponseMsg},
         height := _ResponseHeight,
+        block_time := _ResponseBlockHeight,
+        block_age := _ResponseBlockAge,
         signature := _ResponseSig
     } = _RouteUpdate,
     ExpectedRoutes

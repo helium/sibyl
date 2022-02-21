@@ -3,6 +3,7 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("blockchain/include/blockchain.hrl").
 
 -export([
     create_block/2, create_block/3, create_block/4,
@@ -35,7 +36,8 @@
     create_oui_txn/4,
     setup_meck_txn_forwarding/2,
     get_consensus_members/2,
-    check_genesis_block/2
+    check_genesis_block/2,
+    generate_keys/1, generate_keys/2
 ]).
 
 create_block(ConsensusMembers, Txs) ->
@@ -78,7 +80,7 @@ pmap(F, L) ->
         receive
             {pmap, N, R} -> {N, R}
         end
-        || _ <- L
+     || _ <- L
     ],
     {_, L3} = lists:unzip(lists:keysort(1, L2)),
     L3.
@@ -130,7 +132,7 @@ wait_until_local_height(TargetHeight) ->
             C = blockchain_worker:blockchain(),
             {ok, CurHeight} = blockchain:height(C),
             ct:pal("local height ~p", [CurHeight]),
-            CurHeight == TargetHeight
+            CurHeight >= TargetHeight
         end,
         30,
         timer:seconds(1)
@@ -296,7 +298,7 @@ init_per_testcase(TestCase, Config) ->
         NodeNames
     ),
 
-    ConfigResult = pmap(
+    _ConfigResult = pmap(
         fun(Node) ->
             ct_rpc:call(Node, cover, start, []),
             ct_rpc:call(Node, application, load, [lager]),
@@ -324,6 +326,8 @@ init_per_testcase(TestCase, Config) ->
             ct_rpc:call(Node, application, set_env, [blockchain, peer_cache_timeout, 10000]),
             ct_rpc:call(Node, application, set_env, [blockchain, peerbook_update_interval, 200]),
             ct_rpc:call(Node, application, set_env, [blockchain, peerbook_allow_rfc1918, true]),
+            ct_rpc:call(Node, application, set_env, [blockchain, sc_sup_type, server]),
+
             ct_rpc:call(Node, application, set_env, [
                 blockchain,
                 max_inbound_connections,
@@ -458,7 +462,7 @@ init_per_testcase(TestCase, Config) ->
         {node_listen_addrs, Addrs}
         | Config
     ],
-    initialize_nodes(Config0).
+    initialize_nodes(TestCase, Config0).
 
 end_per_testcase(TestCase, Config) ->
     Nodes = ?config(nodes, Config),
@@ -490,8 +494,8 @@ cleanup_per_testcase(_TestCase, Config) ->
         Nodes
     ).
 
-initialize_nodes(Config) ->
-    Balance = 5000,
+initialize_nodes(TestCase, Config) ->
+    Balance = 50000000000000,
     NumConsensusMembers = ?config(num_consensus_members, Config),
     Nodes = ?config(nodes, Config),
 
@@ -506,22 +510,39 @@ initialize_nodes(Config) ->
     ),
 
     ConsensusAddrs = lists:sublist(lists:sort(Addrs), NumConsensusMembers),
-    DefaultVars = #{num_consensus_members => NumConsensusMembers},
+    DefaultVars = #{?num_consensus_members => NumConsensusMembers},
+    POCV11Vars =
+        case TestCase of
+            X when
+                X == streaming_region_params_test
+            ->
+                sibyl_regions_test_utils:poc_v11_vars();
+            _ ->
+                maps:new()
+        end,
     ExtraVars = #{
-        sc_version => 2,
-        max_open_sc => 2,
-        min_expire_within => 10,
-        max_xor_filter_size => 1024 * 100,
-        max_xor_filter_num => 5,
-        max_subnet_size => 65536,
-        min_subnet_size => 8,
-        max_subnet_num => 20,
-        sc_grace_blocks => 5,
-        dc_payload_size => 24
+        ?sc_version => 2,
+        ?max_open_sc => 2,
+        ?min_expire_within => 10,
+        ?max_xor_filter_size => 1024 * 100,
+        ?max_xor_filter_num => 5,
+        ?max_subnet_size => 65536,
+        ?min_subnet_size => 8,
+        ?max_subnet_num => 20,
+        ?sc_grace_blocks => 5,
+        ?dc_payload_size => 24,
+        ?validator_version => 3,
+        ?validator_minimum_stake => ?bones(10000),
+        ?validator_liveness_grace_period => 10,
+        ?validator_liveness_interval => 5,
+        ?validator_key_check => true,
+        ?stake_withdrawal_cooldown => 10,
+        ?stake_withdrawal_max => 500
     },
 
-    {InitialVars, _Config} = create_vars(maps:merge(DefaultVars, ExtraVars)),
-
+    {InitialTxns, MasterKeyConfig} = create_vars(
+        maps:merge(DefaultVars, maps:merge(POCV11Vars, ExtraVars))
+    ),
     % Create genesis block
     GenPaymentTxs = [blockchain_txn_coinbase_v1:new(Addr, Balance) || Addr <- Addrs],
     GenDCsTxs = [blockchain_txn_dc_coinbase_v1:new(Addr, Balance) || Addr <- Addrs],
@@ -535,10 +556,10 @@ initialize_nodes(Config) ->
             h3:from_geo({37.780586, -122.469470}, 13),
             0
         )
-        || Addr <- Addrs
+     || Addr <- Addrs
     ],
 
-    Txs = InitialVars ++ GenPaymentTxs ++ GenDCsTxs ++ GenGwTxns ++ [GenConsensusGroupTx],
+    Txs = InitialTxns ++ GenPaymentTxs ++ GenDCsTxs ++ GenGwTxns ++ [GenConsensusGroupTx],
     GenesisBlock = blockchain_block:new_genesis_block(Txs),
 
     %% tell each node to integrate the genesis block
@@ -571,7 +592,12 @@ initialize_nodes(Config) ->
 
     ok = check_genesis_block(Config, GenesisBlock),
     ConsensusMembers = get_consensus_members(Config, ConsensusAddrs),
-    [{consensus_members, ConsensusMembers}, {genesis_block, GenesisBlock} | Config].
+    [
+        MasterKeyConfig,
+        {consensus_members, ConsensusMembers},
+        {genesis_block, GenesisBlock}
+        | Config
+    ].
 
 create_vars() ->
     create_vars(#{}).
@@ -797,12 +823,13 @@ get_consensus_members(Config, ConsensusAddrs) ->
 
 setup_meck_txn_forwarding(Node, From) ->
     ok = ct_rpc:call(Node, meck_test_util, forward_submit_txn, [From]),
-    ok = ct_rpc:call(Node, blockchain_worker, submit_txn, [test]),
+    ok = ct_rpc:call(Node, blockchain_txn_mgr, submit, [fake_txn, fun(_, _) -> ok end]),
     receive
-        {txn, test} ->
-            ct:pal("Got txn test"),
+        {txn, fake_txn} ->
+            ct:pal("Got fake_txn test"),
             ok
-    after 1000 -> ct:fail("txn test timeout")
+    after 1000 ->
+        ct:fail("txn test timeout")
     end.
 
 create_oui_txn(OUI, RouterNode, EUIs, SubnetSize) ->
@@ -810,10 +837,7 @@ create_oui_txn(OUI, RouterNode, EUIs, SubnetSize) ->
     RouterPubkeyBin = libp2p_crypto:pubkey_to_bin(RouterPubkey),
     {Filter, _} = xor16:to_bin(
         xor16:new(
-            [
-                <<DevEUI:64/integer-unsigned-little, AppEUI:64/integer-unsigned-little>>
-                || {DevEUI, AppEUI} <- EUIs
-            ],
+            [0],
             fun xxhash:hash64/1
         )
     ),
@@ -843,10 +867,25 @@ local_add_and_gossip_fake_blocks(NumFakeBlocks, ConsensusMembers, Swarm, Chain, 
         end,
         lists:seq(1, NumFakeBlocks)
     ).
+
+generate_keys(N) ->
+    generate_keys(N, ecc_compact).
+
+generate_keys(N, Type) ->
+    lists:foldl(
+        fun(_, Acc) ->
+            #{public := PubKey, secret := PrivKey} = libp2p_crypto:generate_keys(Type),
+            SigFun = libp2p_crypto:mk_sig_fun(PrivKey),
+            [{libp2p_crypto:pubkey_to_bin(PubKey), {PubKey, PrivKey, SigFun}} | Acc]
+        end,
+        [],
+        lists:seq(1, N)
+    ).
+
 %% ------------------------------------------------------------------
 %% Internal functions
 %% ------------------------------------------------------------------
-make_block(Blockchain, ConsensusMembers, STxs, Override) ->
+make_block(Blockchain, ConsensusMembers, STxs, _Override) ->
     {ok, HeadBlock} = blockchain:head_block(Blockchain),
     {ok, PrevHash} = blockchain:head_hash(Blockchain),
     Height = blockchain_block:height(HeadBlock) + 1,
@@ -862,9 +901,10 @@ make_block(Blockchain, ConsensusMembers, STxs, Override) ->
         election_epoch => 1,
         epoch_start => 0,
         seen_votes => [],
-        bba_completion => <<>>
+        bba_completion => <<>>,
+        poc_keys => []
     },
-    Block0 = blockchain_block_v1:new(maps:merge(Default, Override)),
+    Block0 = blockchain_block_v1:new(Default),
     BinBlock = blockchain_block:serialize(Block0),
     Signatures = signatures(ConsensusMembers, BinBlock),
     Block1 = blockchain_block:set_signatures(Block0, Signatures),
