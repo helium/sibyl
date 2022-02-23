@@ -185,10 +185,8 @@ handle_info({blockchain_event, {new_chain, NC}}, State = #state{commit_hook_refs
     lager:debug("updating with new chain", []),
     ets:insert(?TID, {?CHAIN, NC}),
     {noreply, State};
-handle_info({blockchain_event, {add_block, _BlockHash, Sync, _Ledger} = Event}, State) when
-    Sync =:= false
-->
-    lager:debug("received add block event, sync is ~p", [Sync]),
+handle_info({blockchain_event, {add_block, _BlockHash, _Sync, _Ledger} = Event}, State) ->
+    lager:info("received add block event, sync is ~p", [_Sync]),
     ok = process_add_block_event(Event, State),
     {noreply, State};
 handle_info(
