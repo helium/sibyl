@@ -65,10 +65,8 @@ handle_info(
     #state{chain = Chain} = State
 ) when Chain =:= undefined ->
     {noreply, State};
-handle_info({blockchain_event, {add_block, _BlockHash, Sync, _Ledger} = Event}, State) when
-    Sync =:= false
-->
-    lager:debug("received add block event, sync is ~p", [Sync]),
+handle_info({blockchain_event, {add_block, _BlockHash, _Sync, _Ledger} = Event}, State) ->
+    lager:info("received add block event, sync is ~p", [_Sync]),
     handle_add_block_event(Event, State);
 handle_info(_Info, State = #state{}) ->
     {noreply, State}.
@@ -128,7 +126,7 @@ run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, Vars) ->
                 HexList,
                 [{Hex, HexRandState}]
             ),
-            lager:info("*** found gateways for target zone", [ZoneGWs]),
+            lager:info("*** found gateways for target zone: ~p", [ZoneGWs]),
             %% create the notification
             case sibyl_utils:address_data([ChallengerAddr]) of
                 [] ->
