@@ -79,15 +79,8 @@ terminate(_Reason, _State = #state{}) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
--spec handle_add_block_event(
-    {atom(), blockchain_block:hash(), boolean(), blockchain_ledger_v1:ledger()},
-    #state{}
-) -> {noreply, #state{}}.
-handle_add_block_event({add_block, _BlockHash, true = _Sync, _Ledger}, State = #state{}) ->
-    {noreply, State};
 handle_add_block_event(
-    {add_block, BlockHash, false = _Sync, Ledger},
+    {add_block, BlockHash, _Sync, Ledger},
     State = #state{chain = Chain}
 ) ->
     case blockchain:get_block(BlockHash, Chain) of
