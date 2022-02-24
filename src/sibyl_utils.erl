@@ -216,12 +216,16 @@ check_for_public_ip(PubKeyBin) ->
                 [] ->
                     check_for_alias(SwarmTID, PubKeyBin);
                 _ ->
-                    [H | _] = libp2p_transport:sort_addrs_with_keys(SwarmTID, ClearedListenAddrs),
-                    case has_addr_public_ip(H) of
-                        {error, no_public_ip} ->
+                    case libp2p_transport:sort_addrs_with_keys(SwarmTID, ClearedListenAddrs) of
+                        [] ->
                             check_for_alias(SwarmTID, PubKeyBin);
-                        Res ->
-                            Res
+                        [H | _] ->
+                            case has_addr_public_ip(H) of
+                                {error, no_public_ip} ->
+                                    check_for_alias(SwarmTID, PubKeyBin);
+                                Res ->
+                                    Res
+                            end
                     end
             end;
         {error, not_found} ->
