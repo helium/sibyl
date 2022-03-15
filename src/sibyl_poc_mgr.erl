@@ -113,13 +113,13 @@ handle_add_block_event(
 run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, Vars) ->
     Entropy = <<Key/binary, BlockHash/binary>>,
     ZoneRandState = blockchain_utils:rand_state(Entropy),
-    case blockchain_poc_target_v4:target_zone(ZoneRandState, Ledger) of
+    case blockchain_poc_target_v5:target_zone(ZoneRandState, Ledger) of
         {error, _} ->
             lager:info("*** failed to find a target zone", []),
             noop;
         {ok, {HexList, Hex, HexRandState}} ->
             %% get all GWs in this zone
-            {ok, ZoneGWs} = blockchain_poc_target_v4:gateways_for_zone(
+            {ok, ZoneGWs} = blockchain_poc_target_v5:gateways_for_zone(
                 ChallengerAddr,
                 Ledger,
                 Vars,
