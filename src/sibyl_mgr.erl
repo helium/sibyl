@@ -12,11 +12,12 @@
 -define(SIGFUN, sigfun).
 -define(SERVER, ?MODULE).
 -define(VALIDATORS, validators).
+-define(VALIDATOR_COUNT, validator_count).
 -define(ROUTING_CF_NAME, routing).
 -define(STATE_CHANNEL_CF_NAME, state_channels).
 
 -ifdef(TEST).
--define(VALIDATOR_CACHE_REFRESH, 5).
+-define(VALIDATOR_CACHE_REFRESH, 1).
 -else.
 -define(VALIDATOR_CACHE_REFRESH, 100).
 -endif.
@@ -30,6 +31,7 @@
 -type event_types() :: [event_type()].
 -type event() :: {event, binary(), any()} | {event, binary()}.
 -type state() :: #state{}.
+-type val_data() :: {libp2p_crypto:pubkey_bin(), string()}.
 
 -export_type([event_type/0, event_types/0, event/0]).
 %% ------------------------------------------------------------------
@@ -54,7 +56,8 @@
     blockchain/0,
     height/0,
     sigfun/0,
-    validators/0
+    validators/0,
+    validator_count/0
 ]).
 
 %% ------------------------------------------------------------------
@@ -113,12 +116,20 @@ sigfun() ->
         _:_ -> undefined
     end.
 
--spec validators() -> function() | undefined.
+-spec validators() -> [val_data()].
 validators() ->
     try ets:lookup_element(?TID, ?VALIDATORS, 2) of
         X -> X
     catch
         _:_ -> []
+    end.
+
+-spec validator_count() -> integer().
+validator_count() ->
+    try ets:lookup_element(?TID, ?VALIDATOR_COUNT, 2) of
+        X -> X
+    catch
+        _:_ -> 0
     end.
 
 make_ets_table() ->
@@ -344,6 +355,8 @@ update_validator_cache(Ledger) ->
             Ledger
         ),
     _ = ets:insert(?TID, {?VALIDATORS, Vals}),
+    %% keep a count of the number of vals in our cache
+    _ = ets:insert(?TID, {?VALIDATOR_COUNT, length(Vals)}),
     ok.
 
 %% get a public route to the specified validator
