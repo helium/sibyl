@@ -75,34 +75,34 @@ check_challenge_target(
         true ->
             %% are we the target  ?
             {ok, POCMgr} = application:get_env(sibyl, poc_mgr_mod),
-            case POCMgr:check_target(ChallengeePubKeyBin, BlockHash, POCKey) of
-                {error, Reason} ->
-                    %% something went wrong, return error
-                    {grpc_error, {grpcbox_stream:code_to_status(14), Reason}};
-                false ->
-                    %% nope, we are not the target
-                    Response0 = #gateway_poc_check_challenge_target_resp_v1_pb{
-                        target = false,
-                        onion = <<>>
-                    },
-                    Response1 = sibyl_utils:encode_gateway_resp_v1(
-                        Response0,
-                        sibyl_mgr:sigfun()
-                    ),
-                    {ok, Response1, Ctx};
-                {true, Onion} ->
-                    lager:info("target identified as ~p for poc ~p", [ChallengeePubKeyBin, POCKey]),
-                    %% we are the target, return the onion
-                    Response0 = #gateway_poc_check_challenge_target_resp_v1_pb{
-                        target = true,
-                        onion = Onion
-                    },
-                    Response1 = sibyl_utils:encode_gateway_resp_v1(
-                        Response0,
-                        sibyl_mgr:sigfun()
-                    ),
-                    {ok, Response1, Ctx}
-            end
+            Response0 =
+                case POCMgr:check_target(ChallengeePubKeyBin, BlockHash, POCKey) of
+                    {error, Reason} ->
+                        #gateway_error_resp_pb{
+                            error = Reason,
+                            details = POCKey
+                        };
+                    false ->
+                        %% nope, we are not the target
+                        #gateway_poc_check_challenge_target_resp_v1_pb{
+                            target = false,
+                            onion = <<>>
+                        };
+                    {true, Onion} ->
+                        lager:info("target identified as ~p for poc ~p", [
+                            ChallengeePubKeyBin, POCKey
+                        ]),
+                        %% we are the target, return the onion
+                        #gateway_poc_check_challenge_target_resp_v1_pb{
+                            target = true,
+                            onion = Onion
+                        }
+                end,
+            Response1 = sibyl_utils:encode_gateway_resp_v1(
+                Response0,
+                sibyl_mgr:sigfun()
+            ),
+            {ok, Response1, Ctx}
     end.
 
 -spec send_report(
