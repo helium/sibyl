@@ -33,7 +33,7 @@
 -type state() :: #state{}.
 -type val_data() :: {libp2p_crypto:pubkey_bin(), string()}.
 
--export_type([event_type/0, event_types/0, event/0]).
+-export_type([event_type/0, event_types/0, event/0, val_data/0]).
 %% ------------------------------------------------------------------
 %% gen_server exports
 %% ------------------------------------------------------------------
