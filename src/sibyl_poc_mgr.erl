@@ -15,6 +15,7 @@
 
 -include("src/grpc/autogen/server/gateway_pb.hrl").
 -include("sibyl.hrl").
+-include_lib("blockchain/include/blockchain_vars.hrl").
 
 %% API
 -export([start_link/0]).
@@ -111,7 +112,8 @@ handle_add_block_event(
 run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, Vars) ->
     Entropy = <<Key/binary, BlockHash/binary>>,
     ZoneRandState = blockchain_utils:rand_state(Entropy),
-    case blockchain_poc_target_v5:target_zone(ZoneRandState, Ledger) of
+    TargetMod = blockchain_utils:target_v_to_mod(blockchain:config(?poc_targeting_version, Ledger)),
+    case TargetMod:target_zone(ZoneRandState, Ledger) of
         {error, _} ->
             lager:info("*** failed to find a target zone", []),
             noop;
