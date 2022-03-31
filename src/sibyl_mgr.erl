@@ -139,7 +139,7 @@ make_ets_table() ->
 %% ------------------------------------------------------------------
 init(Args) ->
     process_flag(trap_exit, true),
-    lager:info("init with args ~p", [Args]),
+    lager:debug("init with args ~p", [Args]),
     TID =
         case proplists:get_value(ets, Args) of
             undefined ->
@@ -297,7 +297,7 @@ check_for_asserts(Block) ->
             Type = blockchain_txn:type(AssertTxn),
             GWAddr = Type:gateway(AssertTxn),
             Topic = sibyl_utils:make_asserted_gw_topic(GWAddr),
-            lager:info("notifying clients of assert for gw ~p", [GWAddr]),
+            lager:debug("notifying clients of assert for gw ~p", [GWAddr]),
             sibyl_bus:pub(Topic, {asserted_gw_notify, GWAddr})
         end,
         FilteredTxns

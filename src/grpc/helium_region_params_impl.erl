@@ -26,7 +26,7 @@
 %% ------------------------------------------------------------------
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
 init(_RPC, StreamState) ->
-    lager:info("handler init, stream state ~p", [StreamState]),
+    lager:debug("handler init, stream state ~p", [StreamState]),
     NewStreamState = grpcbox_stream:stream_handler_state(
         StreamState,
         #handler_state{mod = ?MODULE, streaming_initialized = false}
@@ -48,7 +48,7 @@ handle_info(
     {asserted_gw_notify, Addr},
     StreamState
 ) ->
-    lager:info("got asserted_gw_notify for addr ~p, sending region params", [Addr]),
+    lager:debug("got asserted_gw_notify for addr ~p, sending region params", [Addr]),
     Chain = sibyl_mgr:blockchain(),
     Ledger = blockchain:ledger(Chain),
     NewStreamState = send_region_params(Addr, Ledger, StreamState),
@@ -76,7 +76,7 @@ region_params_update(
     _StreamState
 ) ->
     %% if chain not up we have no way to retrieve data so just return a 14/503
-    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
+    lager:debug("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 region_params_update(
     _Chain,
@@ -92,7 +92,7 @@ region_params_update(
     #gateway_region_params_update_req_v1_pb{address = Addr, signature = Sig} = Msg,
     StreamState
 ) ->
-    lager:info("executing RPC region_params_update with msg ~p", [Msg]),
+    lager:debug("executing RPC region_params_update with msg ~p", [Msg]),
     %% start a region params update stream
     Chain = sibyl_mgr:blockchain(),
     Ledger = blockchain:ledger(Chain),
@@ -180,4 +180,4 @@ send_region_params(Addr, Ledger, StreamState) ->
 %% 'region_us915' etc, we need it without the prefix and capitalised to
 %% be compatible with the proto
 normalize_region(V) ->
-    list_to_atom(string:to_upper(string:slice(atom_to_list(V),7))).
+    list_to_atom(string:to_upper(string:slice(atom_to_list(V), 7))).

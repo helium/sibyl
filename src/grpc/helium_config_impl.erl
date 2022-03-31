@@ -34,7 +34,7 @@
 %% ------------------------------------------------------------------
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
 init(_RPC, StreamState) ->
-    lager:info("handler init, stream state ~p", [StreamState]),
+    lager:debug("handler init, stream state ~p", [StreamState]),
     NewStreamState = grpcbox_stream:stream_handler_state(
         StreamState,
         #handler_state{config_streaming_initialized = false, mod = ?MODULE}
@@ -64,7 +64,7 @@ handle_info(
     {config_update_notify, Msg},
     StreamState
 ) ->
-    lager:info("received config_update_notify msg, sending to client ~p", [Msg]),
+    lager:debug("received config_update_notify msg, sending to client ~p", [Msg]),
     %% received a config update notification event, we simply have to forward this unmodified to the client
     %% the payload is fully formed and encoded
     NewStreamState = grpcbox_stream:send(false, Msg, StreamState),
@@ -90,7 +90,7 @@ config(
     _Ctx,
     #gateway_config_req_v1_pb{} = _Msg
 ) ->
-    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
+    lager:debug("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 config(
     Chain,
