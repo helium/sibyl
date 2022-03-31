@@ -93,7 +93,7 @@ pocs(
     %% we are already streaming POCs so do nothing further here
     {ok, StreamState};
 pocs(
-    _Chain,
+    Chain,
     false = _StreamingInitialized,
     #gateway_poc_req_v1_pb{address = Addr, signature = Sig} = Msg,
     StreamState
@@ -121,6 +121,7 @@ pocs(
                     streaming_initialized => true
                 }
             ),
+            _ = check_if_reactivated_gw(Addr, Chain),
             {ok, NewStreamState}
     end.
 
@@ -134,3 +135,26 @@ handle_event(
 ) ->
     lager:warning("received unhandled event ~p", [_Event]),
     StreamState.
+
+-spec check_if_reactivated_gw(libp2p_crypto:pubkey_bin(), blockchain:blockchain()) -> ok.
+check_if_reactivated_gw(GWAddr, Chain) ->
+    Ledger = blockchain:ledger(Chain),
+    CurHeight = blockchain_ledger_v1:current_height(Ledger),
+    case blockchain:config(poc_activity_filter_enabled, Ledger) of
+        {ok, true} ->
+            case blockchain_ledger_v1:find_gateway_last_challenge(GWAddr, Ledger) of
+                {ok, undefined} ->
+                    %% No activity set, so include in list to reactivate
+                    %% this means it will become available for POC
+                    _ = sibyl_poc_mgr:cache_reactivated_gw(GWAddr);
+                {ok, C} ->
+                    {ok, MaxActivityAge} = blockchain:config(poc_v4_target_challenge_age, Ledger),
+                    case (CurHeight - C) > MaxActivityAge of
+                        true -> sibyl_poc_mgr:cache_reactivated_gw(GWAddr);
+                        false -> ok
+                    end
+            end;
+        _ ->
+            %% activity filter not set, do nothing
+            ok
+    end.

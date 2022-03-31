@@ -54,11 +54,12 @@ init(_Args) ->
     %% we call `ets:give_away' every time we start_link sibyl_mgr
     _ = sibyl_bus:start(),
     SibylMgrOpts = [{ets, sibyl_mgr:make_ets_table()}],
+    SibylPOCMgrOpts = [{ets, sibyl_poc_mgr:make_ets_table()}],
 
     {ok,
         {?FLAGS, [
             ?WORKER(sibyl_mgr, [SibylMgrOpts]),
-            ?WORKER(sibyl_poc_mgr, [])
+            ?WORKER(sibyl_poc_mgr, [SibylPOCMgrOpts])
         ]}}.
 
 %% internal functions

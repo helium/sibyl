@@ -73,9 +73,9 @@ start_link(Args) ->
                 undefined ->
                     {ok, Pid};
                 Tab ->
-                    true = ets:give_away(Tab, Pid, undefined),
-                    {ok, Pid}
-            end;
+                    true = ets:give_away(Tab, Pid, undefined)
+            end,
+            {ok, Pid};
         Other ->
             Other
     end.
