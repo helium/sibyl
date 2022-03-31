@@ -99,7 +99,7 @@ config(
         keys = Keys
     } = Request
 ) ->
-    lager:info("executing RPC config with msg ~p", [Request]),
+    lager:debug("executing RPC config with msg ~p", [Request]),
     Ledger = blockchain:ledger(Chain),
     NumKeys = length(Keys),
     Response0 =
@@ -180,7 +180,7 @@ config_update(
     #gateway_config_update_req_v1_pb{} = Msg,
     StreamState
 ) ->
-    lager:info("executing RPC config_update with msg ~p", [Msg]),
+    lager:debug("executing RPC config_update with msg ~p", [Msg]),
     %% start a config updates stream
     %% generate a topic key for config updates
     %% this key is global, ie not client specific

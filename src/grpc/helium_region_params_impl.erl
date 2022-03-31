@@ -107,7 +107,7 @@ region_params_update(
             %% topic key for region params streams is the pub key bin
             %% msgs will published by sibyl_mgr when an assert occurs
             Topic = sibyl_utils:make_asserted_gw_topic(Addr),
-            lager:info("subscribing to region params update events for gw ~p", [Addr]),
+            lager:debug("subscribing to region params update events for gw ~p", [Addr]),
             ok = sibyl_bus:sub(Topic, self()),
             HandlerState = grpcbox_stream:stream_handler_state(StreamState),
             NewStreamState1 = grpcbox_stream:stream_handler_state(
