@@ -18,12 +18,19 @@
 -include_lib("blockchain/include/blockchain_vars.hrl").
 
 %% API
--export([start_link/0]).
+-export([
+    start_link/1,
+    make_ets_table/0,
+    cache_reactivated_gw/1,
+    cached_reactivated_gws/0,
+    clear_reactivated_gws/0
+]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
 -define(SERVER, ?MODULE).
+-define(REACTIVATED_GWS, reactivated_gws).
 
 -record(state, {
     chain :: undefined | blockchain:blockchain()
@@ -32,16 +39,48 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+-spec start_link(#{}) -> {ok, pid()}.
+start_link(Args) ->
+    case gen_server:start_link({local, ?MODULE}, ?MODULE, Args, []) of
+        {ok, Pid} ->
+            %% if we have an ETS table reference, give ownership to the new process
+            %% we likely are the `heir', so we'll get it back if this process dies
+            case proplists:get_value(ets, Args) of
+                undefined ->
+                    ok;
+                Tab ->
+                    true = ets:give_away(Tab, Pid, undefined)
+            end,
+            {ok, Pid};
+        Other ->
+            Other
+    end.
 
--spec start_link() -> {ok, Pid :: pid()} | ignore | {error, Reason :: term()}.
-start_link() ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+-spec make_ets_table() -> atom().
+make_ets_table() ->
+    Tab1 = ets:new(
+        ?REACTIVATED_GWS,
+        [
+            named_table,
+            public,
+            {heir, self(), undefined}
+        ]
+    ),
+    Tab1.
 
+cache_reactivated_gw(GWAddr) ->
+    true = ets:insert(?REACTIVATED_GWS, GWAddr).
+
+cached_reactivated_gws() ->
+    ets:tab2list(?REACTIVATED_GWS).
+
+clear_reactivated_gws() ->
+    ets:delete_all_objects(?REACTIVATED_GWS).
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 
-init([]) ->
+init(_Args) ->
     ok = blockchain_event:add_handler(self()),
     erlang:send_after(500, self(), init),
     {ok, #state{}}.
