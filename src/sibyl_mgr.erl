@@ -277,7 +277,7 @@ check_for_chain_var_updates(Block) ->
     ),
     Topic = sibyl_utils:make_config_update_topic(),
     sibyl_bus:pub(Topic, {config_update_notify, Notification}),
-    lager:info("notifying clients of chain var updates: ~p", [UpdatedKeysPB]),
+    lager:debug("notifying clients of chain var updates: ~p", [UpdatedKeysPB]),
     ok.
 
 -spec check_for_asserts(blockchain_block_v1:block()) -> ok.
@@ -356,7 +356,7 @@ add_commit_hooks() ->
     %% and those updates for the current block have *all* been applied
     RouteUpdatesEndFun = fun
         (?ROUTING_CF_NAME = _CFName, CFChangedKeys) ->
-            lager:info("firing route update with changed key ~p", [CFChangedKeys]),
+            lager:debug("firing route update with changed key ~p", [CFChangedKeys]),
             sibyl_bus:pub(
                 ?EVENT_ROUTING_UPDATES_END,
                 sibyl_utils:make_event(?EVENT_ROUTING_UPDATES_END, CFChangedKeys)
