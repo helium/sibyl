@@ -69,10 +69,11 @@ make_ets_table() ->
     Tab1.
 
 cache_reactivated_gw(GWAddr) ->
-    true = ets:insert(?REACTIVATED_GWS, GWAddr).
+    true = ets:insert(?REACTIVATED_GWS, {GWAddr}).
 
 cached_reactivated_gws() ->
-    ets:tab2list(?REACTIVATED_GWS).
+    L = ets:tab2list(?REACTIVATED_GWS),
+    [Addr || {Addr} <- L].
 
 clear_reactivated_gws() ->
     ets:delete_all_objects(?REACTIVATED_GWS).
