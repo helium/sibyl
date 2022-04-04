@@ -19,7 +19,7 @@
 %% ------------------------------------------------------------------
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
 init(_RPC, StreamState) ->
-    lager:info("handler init, stream state ~p", [StreamState]),
+    lager:debug("handler init, stream state ~p", [StreamState]),
     NewStreamState = grpcbox_stream:stream_handler_state(
         StreamState,
         #{streaming_initialized => false, mod => ?MODULE}
@@ -41,7 +41,7 @@ handle_info(
     {config_update_notify, Msg},
     StreamState
 ) ->
-    lager:info("received config_update_notify msg, sending to client ~p", [Msg]),
+    lager:debug("received config_update_notify msg, sending to client ~p", [Msg]),
     %% received a config update notification event, we simply have to forward this unmodified to the client
     %% the payload is fully formed and encoded
     NewStreamState = grpcbox_stream:send(false, Msg, StreamState),
@@ -70,7 +70,7 @@ config_update(
     _StreamState
 ) ->
     %% if chain not up we have no way to retrieve data so just return a 14/503
-    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
+    lager:debug("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 config_update(
     _Chain,
@@ -86,7 +86,7 @@ config_update(
     #gateway_config_update_req_v1_pb{} = Msg,
     StreamState
 ) ->
-    lager:info("executing RPC config_update with msg ~p", [Msg]),
+    lager:debug("executing RPC config_update with msg ~p", [Msg]),
     %% start a config updates stream
     %% generate a topic key for config updates
     %% this key is global, ie not client specific
@@ -100,7 +100,6 @@ config_update(
             streaming_initialized => true
         }
     ),
-    lager:info("*** config update complete", []),
     {ok, NewStreamState}.
 
 %% ------------------------------------------------------------------

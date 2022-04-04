@@ -49,7 +49,7 @@ check_challenge_target(
     _Ctx,
     #gateway_poc_check_challenge_target_req_v1_pb{} = _Msg
 ) ->
-    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
+    lager:debug("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 check_challenge_target(
     _Chain,
@@ -64,7 +64,7 @@ check_challenge_target(
         challengee_sig = Signature
     } = Request
 ) ->
-    lager:info("executing RPC check_challenge_target with msg ~p", [Request]),
+    lager:debug("executing RPC check_challenge_target with msg ~p", [Request]),
     PubKey = libp2p_crypto:bin_to_pubkey(ChallengeePubKeyBin),
     %% verify the signature of the request
     BaseReq = Request#gateway_poc_check_challenge_target_req_v1_pb{challengee_sig = <<>>},
@@ -89,7 +89,7 @@ check_challenge_target(
                             onion = <<>>
                         };
                     {true, Onion} ->
-                        lager:info("target identified as ~p for poc ~p", [
+                        lager:debug("target identified as ~p for poc ~p", [
                             ChallengeePubKeyBin, POCKey
                         ]),
                         %% we are the target, return the onion
@@ -111,7 +111,7 @@ check_challenge_target(
     gateway_pb:gateway_poc_report_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
 send_report(undefined = _Chain, _Ctx, #gateway_poc_report_req_v1_pb{} = _Msg) ->
-    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
+    lager:debug("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 send_report(
     Chain,
@@ -121,7 +121,7 @@ send_report(
     } =
         Request
 ) ->
-    lager:info("executing RPC send_report with msg ~p", [Request]),
+    lager:debug("executing RPC send_report with msg ~p", [Request]),
     Chain = sibyl_mgr:blockchain(),
     Ledger = blockchain:ledger(Chain),
     %% get the addr of the reportee from the witness or receipt report
@@ -177,14 +177,14 @@ send_report(
     gateway_pb:gateway_poc_key_routing_data_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
 poc_key_to_public_uri(undefined = _Chain, _Ctx, #gateway_poc_key_routing_data_req_v1_pb{} = _Msg) ->
-    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
+    lager:debug("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 poc_key_to_public_uri(
     Chain,
     Ctx,
     #gateway_poc_key_routing_data_req_v1_pb{key = OnionKeyHash} = _Message
 ) ->
-    lager:info("executing RPC poc_key_to_public_uri with msg ~p", [_Message]),
+    lager:debug("executing RPC poc_key_to_public_uri with msg ~p", [_Message]),
     Chain = sibyl_mgr:blockchain(),
     Ledger = blockchain:ledger(Chain),
     RespPB =
@@ -209,7 +209,6 @@ poc_key_to_public_uri(
                         }
                 end
         end,
-    lager:info("*** poc key resp: ~p", [RespPB]),
     Resp = sibyl_utils:encode_gateway_resp_v1(
         RespPB,
         sibyl_mgr:sigfun()
