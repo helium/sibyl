@@ -58,14 +58,14 @@ validators(Ctx, #gateway_validators_req_v1_pb{} = Message) ->
     gateway_pb:gateway_address_routing_data_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
 address_to_public_uri(undefined = _Chain, _Ctx, #gateway_address_routing_data_req_v1_pb{} = _Msg) ->
-    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
+    lager:debug("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 address_to_public_uri(
     Chain,
     Ctx,
     #gateway_address_routing_data_req_v1_pb{address = Address} = _Message
 ) ->
-    lager:info("executing RPC address_to_public_uri with msg ~p", [_Message]),
+    lager:debug("executing RPC address_to_public_uri with msg ~p", [_Message]),
     Chain = sibyl_mgr:blockchain(),
     RespPB =
         case sibyl_utils:address_data([Address]) of
@@ -96,7 +96,7 @@ config(
     _Ctx,
     #gateway_config_req_v1_pb{} = _Msg
 ) ->
-    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
+    lager:debug("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 config(
     Chain,
@@ -105,7 +105,7 @@ config(
         keys = Keys
     } = Request
 ) ->
-    lager:info("executing RPC config with msg ~p", [Request]),
+    lager:debug("executing RPC config with msg ~p", [Request]),
     Ledger = blockchain:ledger(Chain),
     NumKeys = length(Keys),
     Response0 =
@@ -158,7 +158,7 @@ validators(
     _Ctx,
     #gateway_validators_req_v1_pb{} = _Msg
 ) ->
-    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
+    lager:debug("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 validators(
     _Chain,
@@ -167,7 +167,7 @@ validators(
         quantity = NumVals
     } = Request
 ) ->
-    lager:info("executing RPC validators with msg ~p", [Request]),
+    lager:debug("executing RPC validators with msg ~p", [Request]),
     %% get list of current validators from the cache
     %% and then get a random sub set of these with size
     %% equal to NumVals
@@ -180,7 +180,7 @@ validators(
     ),
     RandomVals = blockchain_utils:shuffle(Vals1),
     SelectedVals = lists:sublist(RandomVals, max(1, min(NumVals, ?VALIDATOR_LIMIT))),
-    lager:info("randomly selected validators: ~p", [SelectedVals]),
+    lager:debug("randomly selected validators: ~p", [SelectedVals]),
 
     EncodedVals = [
         #routing_address_pb{pub_key = Addr, uri = Routing}

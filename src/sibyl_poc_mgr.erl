@@ -107,7 +107,7 @@ handle_info(
 ) when Chain =:= undefined ->
     {noreply, State};
 handle_info({blockchain_event, {add_block, _BlockHash, _Sync, _Ledger} = Event}, State) ->
-    lager:info("received add block event, sync is ~p", [_Sync]),
+    lager:debug("received add block event, sync is ~p", [_Sync]),
     handle_add_block_event(Event, State);
 handle_info(_Info, State = #state{}) ->
     {noreply, State}.
@@ -155,7 +155,7 @@ run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, Vars) ->
     TargetMod = blockchain_utils:target_v_to_mod(blockchain:config(?poc_targeting_version, Ledger)),
     case TargetMod:target_zone(ZoneRandState, Ledger) of
         {error, _} ->
-            lager:info("*** failed to find a target zone", []),
+            lager:debug("*** failed to find a target zone", []),
             noop;
         {ok, {HexList, Hex, HexRandState}} ->
             %% get all GWs in this zone
@@ -166,17 +166,16 @@ run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, Vars) ->
                 HexList,
                 [{Hex, HexRandState}]
             ),
-            lager:info("*** found gateways for target zone: ~p", [ZoneGWs]),
+            lager:debug("*** found gateways for target zone: ~p", [ZoneGWs]),
             %% create the notification
             case sibyl_utils:address_data([ChallengerAddr]) of
                 [] ->
-                    lager:info("*** no public addr for ~p", [ChallengerAddr]),
+                    lager:debug("*** no public addr for ~p", [ChallengerAddr]),
                     %% hmmm we have no public address for the challenger's pub key
                     %% what to do ?
                     ok;
                 [ChallengerRoutingAddress] ->
-                    lager:info("ChallengerAddr: ~p", [ChallengerAddr]),
-                    lager:info("ChallengerRoutingAddress: ~p", [ChallengerRoutingAddress]),
+                    lager:debug("ChallengerRoutingAddress: ~p", [ChallengerRoutingAddress]),
                     NotificationPB = #gateway_poc_challenge_notification_resp_v1_pb{
                         challenger = ChallengerRoutingAddress,
                         block_hash = BlockHash,
@@ -190,7 +189,7 @@ run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, Vars) ->
                     lists:foreach(
                         fun(GW) ->
                             Topic = sibyl_utils:make_poc_topic(GW),
-                            lager:info("*** sending poc notification to gateway ~p", [GW]),
+                            lager:debug("*** sending poc notification to gateway ~p", [GW]),
                             sibyl_bus:pub(Topic, {poc_notify, Notification})
                         end,
                         ZoneGWs

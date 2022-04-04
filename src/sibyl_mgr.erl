@@ -197,7 +197,7 @@ handle_info({blockchain_event, {new_chain, NC}}, State = #state{commit_hook_refs
     ets:insert(?TID, {?CHAIN, NC}),
     {noreply, State};
 handle_info({blockchain_event, {add_block, _BlockHash, _Sync, _Ledger} = Event}, State) ->
-    lager:info("received add block event, sync is ~p", [_Sync]),
+    lager:debug("received add block event, sync is ~p", [_Sync]),
     ok = process_add_block_event(Event, State),
     {noreply, State};
 handle_info(
@@ -292,7 +292,7 @@ check_for_chain_var_updates(Block) ->
             ),
             Topic = sibyl_utils:make_config_update_topic(),
             sibyl_bus:pub(Topic, {config_update_notify, Notification}),
-            lager:info("notifying clients of chain var updates: ~p", [UpdatedKeysPB]),
+            lager:debug("notifying clients of chain var updates: ~p", [UpdatedKeysPB]),
             ok
     end.
 

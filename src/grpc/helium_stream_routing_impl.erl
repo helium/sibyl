@@ -20,7 +20,7 @@
 %% ------------------------------------------------------------------
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
 init(_RPC, StreamState) ->
-    lager:info("handler init, stream state ~p", [StreamState]),
+    lager:debug("handler init, stream state ~p", [StreamState]),
     NewStreamState = grpcbox_stream:stream_handler_state(
         StreamState,
         #{streaming_initialized => false, mod => ?MODULE}

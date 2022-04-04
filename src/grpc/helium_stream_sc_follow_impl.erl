@@ -98,7 +98,6 @@ handle_info(
     {event, _EventTopic, _Payload} = Event,
     StreamState
 ) ->
-    lager:debug("received event ~p", [Event]),
     NewStreamState = handle_event(Event, StreamState),
     NewStreamState;
 handle_info(

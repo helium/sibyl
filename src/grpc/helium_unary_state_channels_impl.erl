@@ -48,14 +48,14 @@ close_sc(Ctx, #gateway_sc_close_req_v1_pb{} = Message) ->
     gateway_pb:gateway_sc_is_active_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
 is_active_sc(undefined = _Chain, _Ctx, #gateway_sc_is_active_req_v1_pb{} = _Msg) ->
-    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
+    lager:debug("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 is_active_sc(
     Chain,
     Ctx,
     #gateway_sc_is_active_req_v1_pb{sc_id = SCID, sc_owner = SCOwner} = _Message
 ) ->
-    lager:info("executing RPC is_active with msg ~p", [_Message]),
+    lager:debug("executing RPC is_active with msg ~p", [_Message]),
     Response0 = #gateway_sc_is_active_resp_v1_pb{
         active = check_is_active_sc(SCID, SCOwner, Chain),
         sc_id = SCID,
@@ -73,7 +73,7 @@ is_active_sc(
     gateway_pb:gateway_sc_is_overpaid_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
 is_overpaid_sc(undefined = _Chain, _Ctx, #gateway_sc_is_overpaid_req_v1_pb{} = _Msg) ->
-    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
+    lager:debug("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 is_overpaid_sc(
     Chain,
@@ -81,7 +81,7 @@ is_overpaid_sc(
     #gateway_sc_is_overpaid_req_v1_pb{sc_id = SCID, sc_owner = SCOwner, total_dcs = TotalDCs} =
         _Message
 ) ->
-    lager:info("executing RPC is_overpaid with msg ~p", [_Message]),
+    lager:debug("executing RPC is_overpaid with msg ~p", [_Message]),
     Response0 = #gateway_sc_is_overpaid_resp_v1_pb{
         overpaid = check_is_overpaid_sc(SCID, SCOwner, TotalDCs, Chain),
         sc_id = SCID,
@@ -99,7 +99,7 @@ is_overpaid_sc(
     gateway_pb:gateway_sc_close_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()}.
 close_sc(undefined = _Chain, _Ctx, #gateway_sc_close_req_v1_pb{} = _Msg) ->
-    lager:info("chain not ready, returning error response for msg ~p", [_Msg]),
+    lager:debug("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 close_sc(_Chain, Ctx, #gateway_sc_close_req_v1_pb{close_txn = CloseTxn} = _Message) ->
     lager:info("executing RPC close with msg ~p", [_Message]),
