@@ -96,7 +96,7 @@ init_per_testcase(TestCase, Config) ->
     sibyl_ct_utils:wait_until(fun() -> sibyl_mgr:blockchain() /= undefined end),
 
     %% connect the local node to the slaves
-    LocalSwarm = blockchain_swarm:swarm(),
+    LocalSwarm = blockchain_swarm:tid(),
     ok = lists:foreach(
         fun(Node) ->
             NodeSwarm = ct_rpc:call(Node, blockchain_swarm, swarm, [], 2000),
@@ -283,10 +283,10 @@ config_update_test(Config) ->
 
     %% Get a gateway chain & swarm
     GatewayNode1Chain = ct_rpc:call(GatewayNode1, blockchain_worker, blockchain, []),
-    GatewayNode1Swarm = ct_rpc:call(GatewayNode1, blockchain_swarm, swarm, []),
+    GatewayNode1Swarm = ct_rpc:call(GatewayNode1, blockchain_swarm, tid, []),
     Self = self(),
     LocalChain = blockchain_worker:blockchain(),
-    LocalSwarm = blockchain_swarm:swarm(),
+    LocalSwarm = blockchain_swarm:tid(),
 
     {ok, Stream} = grpc_client:new_stream(
         Connection,
@@ -360,11 +360,11 @@ validators_test(Config) ->
     ct:pal("GatewayNode1: ~p", [GatewayNode1]),
     ConsensusMembers = ?config(consensus_members, Config),
     LocalChain = blockchain_worker:blockchain(),
-    LocalSwarm = blockchain_swarm:swarm(),
+    LocalSwarm = blockchain_swarm:tid(),
 
     %% Get a gateway chain, swarm and pubkey_bin
     GatewayNode1Chain = ct_rpc:call(GatewayNode1, blockchain_worker, blockchain, []),
-    GatewayNode1Swarm = ct_rpc:call(GatewayNode1, blockchain_swarm, swarm, []),
+    GatewayNode1Swarm = ct_rpc:call(GatewayNode1, blockchain_swarm, tid, []),
     Self = self(),
 
     %% get an owner for our validators
