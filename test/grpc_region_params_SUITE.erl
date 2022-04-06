@@ -95,7 +95,7 @@ init_per_testcase(TestCase, Config) ->
     sibyl_ct_utils:wait_until(fun() -> sibyl_mgr:blockchain() /= undefined end),
 
     %% connect the local node to the slaves
-    LocalSwarm = blockchain_swarm:swarm(),
+    LocalSwarm = blockchain_swarm:tid(),
     ok = lists:foreach(
         fun(Node) ->
             NodeSwarm = ct_rpc:call(Node, blockchain_swarm, swarm, [], 2000),
@@ -194,7 +194,7 @@ streaming_region_params_test(Config) ->
     {ok, Block1} = sibyl_ct_utils:create_block(ConsensusMembers, [
         SignedAddGatewayTx2, SignedAssertLocationTx2
     ]),
-    _ = blockchain_gossip_handler:add_block(Block1, Chain, self(), blockchain_swarm:swarm()),
+    _ = blockchain_gossip_handler:add_block(Block1, Chain, self(), blockchain_swarm:tid()),
     ok = sibyl_ct_utils:wait_until(fun() -> {ok, 2} == blockchain:height(Chain) end),
 
     {ok, Stream} = grpc_client:new_stream(
@@ -255,7 +255,7 @@ streaming_region_params_test(Config) ->
     ]),
 
     {ok, CurHeight1} = blockchain:height(Chain),
-    _ = blockchain_gossip_handler:add_block(Block2, Chain, self(), blockchain_swarm:swarm()),
+    _ = blockchain_gossip_handler:add_block(Block2, Chain, self(), blockchain_swarm:tid()),
     ok = sibyl_ct_utils:wait_until(fun() ->
         {ok, NewHeight} = blockchain:height(Chain),
         NewHeight == CurHeight1 + 1

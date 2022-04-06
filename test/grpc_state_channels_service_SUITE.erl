@@ -100,7 +100,7 @@ init_per_testcase(TestCase, Config) ->
     sibyl_ct_utils:wait_until(fun() -> sibyl_mgr:blockchain() /= undefined end),
 
     %% connect the local node to the slaves
-    LocalSwarm = blockchain_swarm:swarm(),
+    LocalSwarm = blockchain_swarm:tid(),
     ok = lists:foreach(
         fun(Node) ->
             NodeSwarm = ct_rpc:call(Node, blockchain_swarm, swarm, [], 2000),
@@ -220,7 +220,7 @@ is_active_sc_test(Config) ->
 
     %% Get router chain, swarm and pubkey_bin
     RouterChain = ct_rpc:call(RouterNode, blockchain_worker, blockchain, []),
-    RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, swarm, []),
+    RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, tid, []),
     RouterPubkeyBin = ct_rpc:call(RouterNode, blockchain_swarm, pubkey_bin, []),
 
     %% setup meck txn forwarding
@@ -347,7 +347,7 @@ is_overpaid_sc_test(Config) ->
 
     %% Get router chain, swarm and pubkey_bin
     RouterChain = ct_rpc:call(RouterNode, blockchain_worker, blockchain, []),
-    RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, swarm, []),
+    RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, tid, []),
     RouterPubkeyBin = ct_rpc:call(RouterNode, blockchain_swarm, pubkey_bin, []),
 
     %% setup meck txn forwarding
@@ -471,7 +471,7 @@ close_sc_test(Config) ->
 
     %% Get router chain, swarm and pubkey_bin
     RouterChain = ct_rpc:call(RouterNode, blockchain_worker, blockchain, []),
-    RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, swarm, []),
+    RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, tid, []),
     RouterPubkeyBin = ct_rpc:call(RouterNode, blockchain_swarm, pubkey_bin, []),
 
     %% Check that the meck txn forwarding works
@@ -585,12 +585,12 @@ follow_sc_test(Config) ->
 
     %% Get router chain, swarm and pubkey_bin
     RouterChain = ct_rpc:call(RouterNode, blockchain_worker, blockchain, []),
-    RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, swarm, []),
+    RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, tid, []),
     RouterPubkeyBin = ct_rpc:call(RouterNode, blockchain_swarm, pubkey_bin, []),
 
     %% Get local chain, swarm and pubkey_bin
     LocalChain = blockchain_worker:blockchain(),
-    LocalSwarm = blockchain_swarm:swarm(),
+    LocalSwarm = blockchain_swarm:tid(),
     _LocalPubkeyBin = blockchain_swarm:pubkey_bin(),
 
     %% Check that the meck txn forwarding works
