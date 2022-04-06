@@ -192,49 +192,67 @@ address_data(Addresses) ->
 address_data([], Hosts) ->
     Hosts;
 address_data([PubKeyAddress | Rest], Hosts) ->
-    case check_for_public_ip(PubKeyAddress) of
-        {ok, IP} ->
-            {Port, SSL} = grpc_port(PubKeyAddress),
-            Address = #routing_address_pb{pub_key = PubKeyAddress, uri = format_ip(IP, SSL, Port)},
+    case check_for_public_uri(PubKeyAddress) of
+        {ok, URI} ->
+            Address = #routing_address_pb{pub_key = PubKeyAddress, uri = URI},
             lager:debug("address data ~p", [Address]),
             address_data(Rest, [Address | Hosts]);
         {error, _Reason} ->
-            lager:debug("no public ip for router address ~p. Reason ~p", [PubKeyAddress, _Reason]),
-            address_data(Rest, Hosts)
+            case check_for_alias(PubKeyAddress) of
+                {error, _} ->
+                    lager:debug("no public ip for router address ~p. Reason ~p", [
+                        PubKeyAddress, _Reason
+                    ]),
+                    address_data(Rest, Hosts);
+                {ok, IP} ->
+                    {Port, SSL} = grpc_port(PubKeyAddress),
+                    Address = #routing_address_pb{
+                        pub_key = PubKeyAddress, uri = format_uri(IP, SSL, Port)
+                    },
+                    lager:debug("address data ~p", [Address]),
+                    address_data(Rest, [Address | Hosts])
+            end
     end.
 
--spec check_for_public_ip(libp2p_crypto:pubkey_bin()) -> {ok, binary()} | {error, atom()}.
-check_for_public_ip(PubKeyBin) ->
-    lager:debug("getting IP for peer ~p", [PubKeyBin]),
+-spec check_for_public_uri(libp2p_crypto:pubkey_bin()) -> {ok, binary()} | {error, atom()}.
+check_for_public_uri(PubKeyBin) ->
+    lager:debug("getting public addr for peer ~p", [PubKeyBin]),
     SwarmTID = blockchain_swarm:tid(),
     Peerbook = libp2p_swarm:peerbook(SwarmTID),
     case libp2p_peerbook:get(Peerbook, PubKeyBin) of
-        {ok, PeerInfo} ->
-            ClearedListenAddrs = libp2p_peer:cleared_listen_addrs(PeerInfo),
-            %% sort listen addrs, ensure the public ip is at the head
-            case ClearedListenAddrs of
-                [] ->
-                    check_for_alias(SwarmTID, PubKeyBin);
-                _ ->
-                    case libp2p_transport:sort_addrs_with_keys(SwarmTID, ClearedListenAddrs) of
+        {ok, Peer} ->
+            case maps:get(<<"grpc_address">>, libp2p_peer:signed_metadata(Peer), undefined) of
+                undefined ->
+                    %% sort listen addrs, ensure the public ip is at the head
+                    case libp2p_peer:cleared_listen_addrs(Peer) of
                         [] ->
-                            check_for_alias(SwarmTID, PubKeyBin);
-                        [H | _] ->
-                            case has_addr_public_ip(H) of
-                                {error, no_public_ip} ->
-                                    check_for_alias(SwarmTID, PubKeyBin);
-                                Res ->
-                                    Res
+                            {error, no_listen_addrs};
+                        ClearedListenAddrs ->
+                            case
+                                libp2p_transport:sort_addrs_with_keys(SwarmTID, ClearedListenAddrs)
+                            of
+                                [] ->
+                                    {error, no_listen_addrs};
+                                [H | _] ->
+                                    case has_addr_public_ip(H) of
+                                        {error, no_public_ip} = Error ->
+                                            Error;
+                                        {ok, IP} ->
+                                            {Port, SSL} = grpc_port(PubKeyBin),
+                                            {ok, format_uri(IP, SSL, Port)}
+                                    end
                             end
-                    end
+                    end;
+                Addr ->
+                    Addr
             end;
         {error, not_found} ->
-            %% we dont have this peer in our peerbook, check if we have an alias for it
-            check_for_alias(SwarmTID, PubKeyBin)
+            {error, peer_not_found}
     end.
 
--spec check_for_alias(atom(), libp2p_crypto:pubkey_bin()) -> binary() | {error, atom()}.
-check_for_alias(SwarmTID, PubKeyBin) ->
+-spec check_for_alias(libp2p_crypto:pubkey_bin()) -> binary() | {error, atom()}.
+check_for_alias(PubKeyBin) ->
+    SwarmTID = blockchain_swarm:tid(),
     MAddr = libp2p_crypto:pubkey_bin_to_p2p(PubKeyBin),
     Aliases = application:get_env(libp2p, node_aliases, []),
     case lists:keyfind(MAddr, 1, Aliases) of
@@ -254,9 +272,8 @@ grpc_port(PubKeyBin) ->
     Aliases = application:get_env(sibyl, node_grpc_port_aliases, []),
     case lists:keyfind(MAddr, 1, Aliases) of
         false ->
-            {ok, [GrpcOpts]} = application:get_env(grpcbox, servers),
-            #{listen_opts := #{port := Port}, transport_opts := #{ssl := SSL}} = GrpcOpts,
-            {Port, SSL};
+            Port = application:get_env(sibyl, grpc_port, 8080),
+            {Port, false};
         {MAddr, {Port, SSL}} ->
             {Port, SSL}
     end.
@@ -268,12 +285,12 @@ has_addr_public_ip({1, Addr}) ->
 has_addr_public_ip({_, _Addr}) ->
     {error, no_public_ip}.
 
--spec format_ip(binary(), boolean(), non_neg_integer()) -> binary().
-format_ip(IP, true, Port) ->
+-spec format_uri(binary(), boolean(), non_neg_integer()) -> binary().
+format_uri(IP, true, Port) ->
     list_to_binary(
         uri_string:normalize(#{scheme => "https", port => Port, host => IP, path => ""})
     );
-format_ip(IP, false, Port) ->
+format_uri(IP, false, Port) ->
     list_to_binary(uri_string:normalize(#{scheme => "http", port => Port, host => IP, path => ""})).
 
 list_to_num(V) ->
