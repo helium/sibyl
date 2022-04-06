@@ -565,14 +565,3 @@ deserialize_sc(SC = <<1, _/binary>>) ->
     {v1, blockchain_ledger_state_channel_v1:deserialize(SC)};
 deserialize_sc(SC = <<2, _/binary>>) ->
     {v2, blockchain_ledger_state_channel_v2:deserialize(SC)}.
-
--spec get_sc_original(
-    blockchain_ledger_state_channel_v1
-    | blockchain_ledger_state_channel_v2,
-    blockchain_ledger_state_channel_v1:state_channel()
-    | blockchain_ledger_state_channel_v2:state_channel()
-) -> non_neg_integer().
-get_sc_original(blockchain_ledger_state_channel_v1, _SC) ->
-    0;
-get_sc_original(blockchain_ledger_state_channel_v2, SC) ->
-    blockchain_ledger_state_channel_v2:original(SC).
