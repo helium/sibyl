@@ -71,7 +71,7 @@ start_link(Args) ->
             %% we likely are the `heir', so we'll get it back if this process dies
             case proplists:get_value(ets, Args) of
                 undefined ->
-                    {ok, Pid};
+                    ok;
                 Tab ->
                     true = ets:give_away(Tab, Pid, undefined)
             end,
