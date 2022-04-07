@@ -16,6 +16,7 @@
 -include("src/grpc/autogen/server/gateway_pb.hrl").
 -include("sibyl.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
+-include_lib("blockchain/include/blockchain.hrl").
 
 %% API
 -export([
@@ -82,7 +83,7 @@ clear_reactivated_gws() ->
 %%%===================================================================
 
 init(_Args) ->
-    ok = blockchain_event:add_handler(self()),
+    ok = blockchain_poc_event:add_handler(self()),
     erlang:send_after(500, self(), init),
     {ok, #state{}}.
 
@@ -102,14 +103,17 @@ handle_info(init, #state{chain = undefined} = State) ->
             {noreply, State#state{chain = Chain}}
     end;
 handle_info(
-    {blockchain_event, {add_block, _BlockHash, _Sync, _Ledger} = _Event},
+    {blockchain_poc_event, {poc_keys, _Payload} = _Event},
     #state{chain = Chain} = State
 ) when Chain =:= undefined ->
     {noreply, State};
-handle_info({blockchain_event, {add_block, _BlockHash, _Sync, _Ledger} = Event}, State) ->
-    lager:debug("received add block event, sync is ~p", [_Sync]),
-    handle_add_block_event(Event, State);
-handle_info(_Info, State = #state{}) ->
+handle_info(
+    {blockchain_poc_event, {poc_keys, _Payload} = Event}, State
+) ->
+    lager:debug("received poc_keys event:  ~p", [Event]),
+    handle_poc_event(Event, State);
+handle_info(Msg, State = #state{}) ->
+    lager:warning("unhandled msg ~p", [Msg]),
     {noreply, State}.
 
 terminate(_Reason, _State = #state{}) ->
@@ -118,36 +122,30 @@ terminate(_Reason, _State = #state{}) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-handle_add_block_event(
-    {add_block, BlockHash, _Sync, Ledger},
+handle_poc_event(
+    {poc_keys, {_BlockHeight, BlockHash, _Sync, BlockPOCs}},
     State = #state{chain = Chain}
 ) ->
-    case blockchain:get_block(BlockHash, Chain) of
-        {ok, Block} ->
-            Vars = blockchain_utils:vars_binary_keys_to_atoms(
-                maps:from_list(blockchain_ledger_v1:snapshot_vars(Ledger))
-            ),
-            %% get the empheral keys from the block
-            %% keys will be a prop with tuples in the format: {ChallengerPubKey, Key}
-            PocEphemeralKeys = blockchain_block_v1:poc_keys(Block),
-            %% a POC will be active for each key
-            %% for each notify all GWs in the target region
-            %% telling them they have to contact the challenger to check if they are the actual target
-            [
-                begin
-                    spawn_link(
-                        fun() ->
-                            run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, Vars)
-                        end
-                    )
+    Ledger = blockchain:ledger(Chain),
+    Vars = blockchain_utils:vars_binary_keys_to_atoms(
+        maps:from_list(blockchain_ledger_v1:snapshot_vars(Ledger))
+    ),
+    %% a POC will be active for each record in BlockPOCs
+    %% for each notify all GWs in the target region
+    %% telling them they have to contact the challenger to check if they are the actual target
+    [
+        begin
+            spawn_link(
+                fun() ->
+                    Key = blockchain_ledger_poc_v3:onion_key_hash(POC),
+                    Challenger = blockchain_ledger_poc_v3:challenger(POC),
+                    run_poc_targetting(Challenger, Key, Ledger, BlockHash, Vars)
                 end
-             || {ChallengerAddr, Key} <- PocEphemeralKeys
-            ],
-            {noreply, State#state{}};
-        _ ->
-            lager:error("failed to find block with hash: ~p", [BlockHash]),
-            {noreply, State}
-    end.
+            )
+        end
+     || {_, POC} <- BlockPOCs
+    ],
+    {noreply, State#state{}}.
 
 run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, Vars) ->
     Entropy = <<Key/binary, BlockHash/binary>>,
