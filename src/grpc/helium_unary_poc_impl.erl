@@ -146,7 +146,7 @@ send_report(
                                 ok = POCMgr:report(
                                     {ReportType, Report}, OnionKeyHash, Peer, PeerP2PAddr
                                 ),
-                                #gateway_success_resp_pb{resp = <<"ok">>, details = <<>>};
+                                #gateway_success_resp_pb{};
                             false ->
                                 lager:warning(
                                     "received report when not challenger. Report: ~p, OnionKeyHash: ~p",
