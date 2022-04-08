@@ -24,7 +24,8 @@
     make_ets_table/0,
     cache_reactivated_gw/1,
     cached_reactivated_gws/0,
-    clear_reactivated_gws/0
+    clear_reactivated_gws/0,
+    delete_reactivated_gws/1
 ]).
 
 %% gen_server callbacks
@@ -75,6 +76,9 @@ cache_reactivated_gw(GWAddr) ->
 cached_reactivated_gws() ->
     L = ets:tab2list(?REACTIVATED_GWS),
     [Addr || {Addr} <- L].
+
+delete_reactivated_gws(L) ->
+    [ets:delete(?REACTIVATED_GWS, GWAddr) || GWAddr <- L].
 
 clear_reactivated_gws() ->
     ets:delete_all_objects(?REACTIVATED_GWS).
