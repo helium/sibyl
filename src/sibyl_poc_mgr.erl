@@ -147,7 +147,7 @@ handle_poc_event(
                 end
             )
         end
-     || {_, POC} <- BlockPOCs
+     || POC <- BlockPOCs
     ],
     {noreply, State#state{}}.
 
