@@ -244,7 +244,7 @@ check_for_public_uri(PubKeyBin) ->
                             end
                     end;
                 Addr ->
-                    Addr
+                    {ok, Addr}
             end;
         {error, not_found} ->
             {error, peer_not_found}
