@@ -127,7 +127,7 @@ terminate(_Reason, _State = #state{}) ->
 %%% Internal functions
 %%%===================================================================
 handle_poc_event(
-    {poc_keys, {_BlockHeight, BlockHash, _Sync, BlockPOCs}},
+    {poc_keys, {_BlockHeight, BlockHash, BlockPOCs}},
     State = #state{chain = Chain}
 ) ->
     Ledger = blockchain:ledger(Chain),
