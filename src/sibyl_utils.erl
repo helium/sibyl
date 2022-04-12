@@ -244,6 +244,7 @@ check_for_public_uri(PubKeyBin) ->
                             end
                     end;
                 Addr ->
+                    lager:debug("using gossiped grpc port ~p for gw ~p", [Addr, PubKeyBin]),
                     {ok, Addr}
             end;
         {error, not_found} ->
