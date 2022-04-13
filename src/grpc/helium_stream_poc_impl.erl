@@ -139,7 +139,7 @@ handle_event(
 -spec check_if_reactivated_gw(libp2p_crypto:pubkey_bin(), blockchain:blockchain()) -> ok.
 check_if_reactivated_gw(GWAddr, Chain) ->
     Ledger = blockchain:ledger(Chain),
-    CurHeight = blockchain_ledger_v1:current_height(Ledger),
+    {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
     case blockchain:config(poc_activity_filter_enabled, Ledger) of
         {ok, true} ->
             case blockchain_ledger_v1:find_gateway_last_challenge(GWAddr, Ledger) of
