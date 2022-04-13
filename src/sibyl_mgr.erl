@@ -12,11 +12,12 @@
 -define(SIGFUN, sigfun).
 -define(SERVER, ?MODULE).
 -define(VALIDATORS, validators).
+-define(VALIDATOR_COUNT, validator_count).
 -define(ROUTING_CF_NAME, routing).
 -define(STATE_CHANNEL_CF_NAME, state_channels).
 
 -ifdef(TEST).
--define(VALIDATOR_CACHE_REFRESH, 5).
+-define(VALIDATOR_CACHE_REFRESH, 1).
 -else.
 -define(VALIDATOR_CACHE_REFRESH, 100).
 -endif.
@@ -30,9 +31,9 @@
 -type event_types() :: [event_type()].
 -type event() :: {event, binary(), any()} | {event, binary()}.
 -type state() :: #state{}.
+-type val_data() :: {libp2p_crypto:pubkey_bin(), string()}.
 
--export_type([event_type/0, event_types/0, event/0]).
-
+-export_type([event_type/0, event_types/0, event/0, val_data/0]).
 %% ------------------------------------------------------------------
 %% gen_server exports
 %% ------------------------------------------------------------------
@@ -55,7 +56,8 @@
     blockchain/0,
     height/0,
     sigfun/0,
-    validators/0
+    validators/0,
+    validator_count/0
 ]).
 
 %% ------------------------------------------------------------------
@@ -69,11 +71,11 @@ start_link(Args) ->
             %% we likely are the `heir', so we'll get it back if this process dies
             case proplists:get_value(ets, Args) of
                 undefined ->
-                    {ok, Pid};
+                    ok;
                 Tab ->
-                    true = ets:give_away(Tab, Pid, undefined),
-                    {ok, Pid}
-            end;
+                    true = ets:give_away(Tab, Pid, undefined)
+            end,
+            {ok, Pid};
         Other ->
             Other
     end.
@@ -114,12 +116,20 @@ sigfun() ->
         _:_ -> undefined
     end.
 
--spec validators() -> function() | undefined.
+-spec validators() -> [val_data()].
 validators() ->
     try ets:lookup_element(?TID, ?VALIDATORS, 2) of
         X -> X
     catch
         _:_ -> []
+    end.
+
+-spec validator_count() -> integer().
+validator_count() ->
+    try ets:lookup_element(?TID, ?VALIDATOR_COUNT, 2) of
+        X -> X
+    catch
+        _:_ -> 0
     end.
 
 make_ets_table() ->
@@ -174,6 +184,7 @@ handle_info(setup, State) ->
             ets:insert(?TID, {?SIGFUN, SigFun}),
             ets:insert(?TID, {?HEIGHT, CurHeight}),
             {ok, Refs} = add_commit_hooks(),
+            ok = update_validator_cache(Ledger),
             ok = subscribe_to_events(),
             {noreply, State#state{commit_hook_refs = Refs}}
     catch
@@ -185,10 +196,8 @@ handle_info({blockchain_event, {new_chain, NC}}, State = #state{commit_hook_refs
     lager:debug("updating with new chain", []),
     ets:insert(?TID, {?CHAIN, NC}),
     {noreply, State};
-handle_info({blockchain_event, {add_block, _BlockHash, Sync, _Ledger} = Event}, State) when
-    Sync =:= false
-->
-    lager:debug("received add block event, sync is ~p", [Sync]),
+handle_info({blockchain_event, {add_block, _BlockHash, _Sync, _Ledger} = Event}, State) ->
+    lager:debug("received add block event, sync is ~p", [_Sync]),
     ok = process_add_block_event(Event, State),
     {noreply, State};
 handle_info(
@@ -254,6 +263,8 @@ process_add_block_event({add_block, BlockHash, _Sync, Ledger}, _State) ->
             ok
     end.
 
+%% checks if we have any chain var txns
+%% if so, publish an event for consumers of the config stream
 -spec check_for_chain_var_updates(blockchain_block_v1:block()) -> ok.
 check_for_chain_var_updates(Block) ->
     Txns = blockchain_block:transactions(Block),
@@ -261,25 +272,32 @@ check_for_chain_var_updates(Block) ->
         fun(Txn) -> blockchain_txn:type(Txn) == blockchain_txn_vars_v1 end,
         Txns
     ),
-    UpdatedKeysPB =
-        lists:flatmap(
-            fun(VarTxn) ->
-                Vars = maps:to_list(blockchain_txn_vars_v1:decoded_vars(VarTxn)),
-                [sibyl_utils:ensure(binary, K) || {K, _V} <- Vars]
-            end,
-            FilteredTxns
-        ),
-    %% publish an event with the updated vars
-    %% all subscribed clients will get the same msg payload
-    Notification = sibyl_utils:encode_gateway_resp_v1(
-        #gateway_config_update_streamed_resp_v1_pb{keys = UpdatedKeysPB},
-        sibyl_mgr:sigfun()
-    ),
-    Topic = sibyl_utils:make_config_update_topic(),
-    sibyl_bus:pub(Topic, {config_update_notify, Notification}),
-    lager:debug("notifying clients of chain var updates: ~p", [UpdatedKeysPB]),
-    ok.
+    case FilteredTxns of
+        [] ->
+            ok;
+        _ ->
+            UpdatedKeysPB =
+                lists:flatmap(
+                    fun(VarTxn) ->
+                        Vars = maps:to_list(blockchain_txn_vars_v1:decoded_vars(VarTxn)),
+                        [sibyl_utils:ensure(binary, K) || {K, _V} <- Vars]
+                    end,
+                    FilteredTxns
+                ),
+            %% publish an event with the updated vars
+            %% all subscribed clients will get the same msg payload
+            Notification = sibyl_utils:encode_gateway_resp_v1(
+                #gateway_config_update_streamed_resp_v1_pb{keys = UpdatedKeysPB},
+                sibyl_mgr:sigfun()
+            ),
+            Topic = sibyl_utils:make_config_update_topic(),
+            sibyl_bus:pub(Topic, {config_update_notify, Notification}),
+            lager:debug("notifying clients of chain var updates: ~p", [UpdatedKeysPB]),
+            ok
+    end.
 
+%% check the block for any asserts
+%% if so, publish an event for consumers of the region_params_update stream
 -spec check_for_asserts(blockchain_block_v1:block()) -> ok.
 check_for_asserts(Block) ->
     Txns = blockchain_block:transactions(Block),
@@ -304,6 +322,8 @@ check_for_asserts(Block) ->
     ),
     ok.
 
+%% maintains a cache of active validators
+%% updated periodically, based on VALIDATOR_CACHE_REFRESH setting
 -spec update_validator_cache(Ledger :: blockchain_ledger_v1:ledger()) -> ok.
 update_validator_cache(Ledger) ->
     {ok, HBInterval} = blockchain:config(?validator_liveness_interval, Ledger),
@@ -334,8 +354,11 @@ update_validator_cache(Ledger) ->
             Ledger
         ),
     _ = ets:insert(?TID, {?VALIDATORS, Vals}),
+    %% keep a count of the number of vals in our cache
+    _ = ets:insert(?TID, {?VALIDATOR_COUNT, length(Vals)}),
     ok.
 
+%% get a public route to the specified validator
 -spec get_validator_routing(libp2p_crypto:pubkey_bin()) -> {error, any()} | {ok, binary()}.
 get_validator_routing(Addr) ->
     case sibyl_utils:address_data([Addr]) of
@@ -345,10 +368,9 @@ get_validator_routing(Addr) ->
             {ok, URI}
     end.
 
+%% add any required commit hooks to the ledger
 -spec add_commit_hooks() -> {ok, [reference() | atom()]}.
 add_commit_hooks() ->
-    %% add any required commit hooks to the ledger
-
     %% Routing Related Hooks
     %% we arent interested in receiving incremental/partial updates of route data
     RouteUpdateIncrementalFun = fun(_Update) -> noop end,

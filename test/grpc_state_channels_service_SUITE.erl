@@ -100,7 +100,7 @@ init_per_testcase(TestCase, Config) ->
     sibyl_ct_utils:wait_until(fun() -> sibyl_mgr:blockchain() /= undefined end),
 
     %% connect the local node to the slaves
-    LocalSwarm = blockchain_swarm:swarm(),
+    LocalSwarm = blockchain_swarm:tid(),
     ok = lists:foreach(
         fun(Node) ->
             NodeSwarm = ct_rpc:call(Node, blockchain_swarm, swarm, [], 2000),
@@ -220,7 +220,7 @@ is_active_sc_test(Config) ->
 
     %% Get router chain, swarm and pubkey_bin
     RouterChain = ct_rpc:call(RouterNode, blockchain_worker, blockchain, []),
-    RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, swarm, []),
+    RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, tid, []),
     RouterPubkeyBin = ct_rpc:call(RouterNode, blockchain_swarm, pubkey_bin, []),
 
     %% setup meck txn forwarding
@@ -262,20 +262,15 @@ is_active_sc_test(Config) ->
     %% Checking that state channel got created properly
     {true, _SC1} = check_sc_open(RouterNode, RouterChain, RouterPubkeyBin, ID),
 
-    %% Check that the nonce of the sc server is okay
-    ok = sibyl_ct_utils:wait_until(
-        fun() ->
-            {ok, 0} == ct_rpc:call(RouterNode, blockchain_state_channels_server, nonce, [ID])
-        end,
-        30,
-        timer:seconds(1)
-    ),
-
-    [ActiveSCID] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_ids, []),
     %% pull the active SC from the router node, confirm it has same ID as one from ledger
     %% and then use it to test the is_valid GRPC api
-    [ActiveSCPB] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_scs, []),
+    ActiveSCs = ct_rpc:call(RouterNode, blockchain_state_channels_server, get_actives, []),
+    ct:pal("ActiveSCs: ~p", [ActiveSCs]),
+    ?assert(maps:is_key(ID, ActiveSCs)),
+    {ActiveSCPB, ActiveSCPBStatus, _} = maps:get(ID, ActiveSCs),
     ct:pal("ActiveSCPB: ~p", [ActiveSCPB]),
+    ?assertEqual(active, ActiveSCPBStatus),
+
     SCOwner = blockchain_state_channel_v1:owner(ActiveSCPB),
     SCID = blockchain_state_channel_v1:id(ActiveSCPB),
 
@@ -302,13 +297,7 @@ is_active_sc_test(Config) ->
     #{<<":status">> := HttpStatus1} = Headers1,
     ?assertEqual(HttpStatus1, <<"200">>),
     ?assertEqual(
-        ResponseMsg1#{
-            sc_id := ActiveSCID,
-            sc_owner := SCOwner,
-            active := true,
-            sc_expiry_at_block := 12,
-            sc_original_dc_amount := 20
-        },
+        ResponseMsg1#{sc_id := SCID, sc_owner := SCOwner, active := true},
         ResponseMsg1
     ),
 
@@ -358,7 +347,7 @@ is_overpaid_sc_test(Config) ->
 
     %% Get router chain, swarm and pubkey_bin
     RouterChain = ct_rpc:call(RouterNode, blockchain_worker, blockchain, []),
-    RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, swarm, []),
+    RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, tid, []),
     RouterPubkeyBin = ct_rpc:call(RouterNode, blockchain_swarm, pubkey_bin, []),
 
     %% setup meck txn forwarding
@@ -400,20 +389,15 @@ is_overpaid_sc_test(Config) ->
     %% Checking that state channel got created properly
     {true, _SC1} = check_sc_open(RouterNode, RouterChain, RouterPubkeyBin, ID),
 
-    %% Check that the nonce of the sc server is okay
-    ok = sibyl_ct_utils:wait_until(
-        fun() ->
-            {ok, 0} == ct_rpc:call(RouterNode, blockchain_state_channels_server, nonce, [ID])
-        end,
-        30,
-        timer:seconds(1)
-    ),
-
-    [ActiveSCID] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_ids, []),
     %% pull the active SC from the router node, confirm it has same ID as one from ledger
     %% and then use it to test the is_valid GRPC api
-    [ActiveSCPB] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_scs, []),
+    ActiveSCs = ct_rpc:call(RouterNode, blockchain_state_channels_server, get_actives, []),
+    ct:pal("ActiveSCs: ~p", [ActiveSCs]),
+    ?assert(maps:is_key(ID, ActiveSCs)),
+    {ActiveSCPB, ActiveSCPBStatus, _} = maps:get(ID, ActiveSCs),
     ct:pal("ActiveSCPB: ~p", [ActiveSCPB]),
+    ?assertEqual(active, ActiveSCPBStatus),
+
     SCOwner = blockchain_state_channel_v1:owner(ActiveSCPB),
     SCID = blockchain_state_channel_v1:id(ActiveSCPB),
 
@@ -423,8 +407,8 @@ is_overpaid_sc_test(Config) ->
         result := #{
             msg := {is_overpaid_resp, ResponseMsg1},
             height := _ResponseHeight1,
-            block_time := _ResponseBlockHeight,
-            block_age := _ResponseBlockAge,
+            block_time := _ResponseBlockHeight1,
+            block_age := _ResponseBlockAge1,
             signature := _ResponseSig1
         } = Result1
     }} = grpc_client:unary(
@@ -440,7 +424,7 @@ is_overpaid_sc_test(Config) ->
     #{<<":status">> := HttpStatus1} = Headers1,
     ?assertEqual(HttpStatus1, <<"200">>),
     ?assertEqual(
-        ResponseMsg1#{sc_id := ActiveSCID, sc_owner := SCOwner, overpaid := false},
+        ResponseMsg1#{sc_id := SCID, sc_owner := SCOwner, overpaid := false},
         ResponseMsg1
     ),
 
@@ -467,10 +451,11 @@ is_overpaid_sc_test(Config) ->
     #{<<":status">> := HttpStatus2} = Headers2,
     ?assertEqual(HttpStatus2, <<"200">>),
     ?assertEqual(
-        ResponseMsg2#{sc_id := ActiveSCID, sc_owner := SCOwner, overpaid := true},
+        ResponseMsg2#{sc_id := SCID, sc_owner := SCOwner, overpaid := true},
         ResponseMsg2
     ),
 
+    %%    timer:sleep(20000),
     ok.
 
 close_sc_test(Config) ->
@@ -486,7 +471,7 @@ close_sc_test(Config) ->
 
     %% Get router chain, swarm and pubkey_bin
     RouterChain = ct_rpc:call(RouterNode, blockchain_worker, blockchain, []),
-    RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, swarm, []),
+    RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, tid, []),
     RouterPubkeyBin = ct_rpc:call(RouterNode, blockchain_swarm, pubkey_bin, []),
 
     %% Check that the meck txn forwarding works
@@ -531,20 +516,17 @@ close_sc_test(Config) ->
     %% Checking that state channel got created properly
     {true, _SC1} = check_sc_open(RouterNode, RouterChain, RouterPubkeyBin, ID),
 
-    %% Check that the nonce of the sc server is okay
-    ok = sibyl_ct_utils:wait_until(
-        fun() ->
-            {ok, 0} == ct_rpc:call(RouterNode, blockchain_state_channels_server, nonce, [ID])
-        end,
-        30,
-        timer:seconds(1)
-    ),
-
-    %% get the open state channels ID
-    [ActiveSCID] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_ids, []),
-    %% pull the active SC from the router node, we will need it in for our close txn
-    [ActiveSCPB] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_scs, []),
+    %% pull the active SC from the router node, confirm it has same ID as one from ledger
+    %% and then use it to test the is_valid GRPC api
+    ActiveSCs = ct_rpc:call(RouterNode, blockchain_state_channels_server, get_actives, []),
+    ct:pal("ActiveSCs: ~p", [ActiveSCs]),
+    ?assert(maps:is_key(ID, ActiveSCs)),
+    {ActiveSCPB, ActiveSCPBStatus, _} = maps:get(ID, ActiveSCs),
     ct:pal("ActiveSCPB: ~p", [ActiveSCPB]),
+    ?assertEqual(active, ActiveSCPBStatus),
+
+    SCOwner = blockchain_state_channel_v1:owner(ActiveSCPB),
+    SCID = blockchain_state_channel_v1:id(ActiveSCPB),
 
     %% setup the close txn, first as records
     SCClose = blockchain_state_channel_v1:state(closed, ActiveSCPB),
@@ -559,14 +541,14 @@ close_sc_test(Config) ->
 
     %% use the grpc APIs to close the SC
     {ok, #{
-        headers := Headers,
+        headers := Headers1,
         result := #{
-            msg := {close_resp, ResponseMsg},
-            height := _ResponseHeight,
-            block_time := _ResponseBlockHeight,
-            block_age := _ResponseBlockAge,
-            signature := _ResponseSig
-        } = Result
+            msg := {close_resp, ResponseMsg1},
+            height := _ResponseHeight1,
+            block_time := _ResponseBlockHeight1,
+            block_age := _ResponseBlockAge1,
+            signature := _ResponseSig1
+        } = Result1
     }} = grpc_client:unary(
         Connection,
         #{close_txn => SignedTxnMap2},
@@ -575,14 +557,14 @@ close_sc_test(Config) ->
         gateway_client_pb,
         []
     ),
-    ct:pal("Response Headers: ~p", [Headers]),
-    ct:pal("Response Body: ~p", [Result]),
-    #{<<":status">> := HttpStatus} = Headers,
+    ct:pal("Response Headers: ~p", [Headers1]),
+    ct:pal("Response Body: ~p", [Result1]),
+    #{<<":status">> := HttpStatus} = Headers1,
     ?assertEqual(HttpStatus, <<"200">>),
-    ?assertEqual(ResponseMsg#{sc_id := ActiveSCID, response := <<"ok">>}, ResponseMsg),
+    ?assertEqual(ResponseMsg1#{sc_id := SCID, response := <<"ok">>}, ResponseMsg1),
 
     %% confirm we see the close txn
-    ok = check_all_closed([ActiveSCID]),
+    ok = check_all_closed([SCID]),
 
     ok.
 
@@ -603,12 +585,12 @@ follow_sc_test(Config) ->
 
     %% Get router chain, swarm and pubkey_bin
     RouterChain = ct_rpc:call(RouterNode, blockchain_worker, blockchain, []),
-    RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, swarm, []),
+    RouterSwarm = ct_rpc:call(RouterNode, blockchain_swarm, tid, []),
     RouterPubkeyBin = ct_rpc:call(RouterNode, blockchain_swarm, pubkey_bin, []),
 
     %% Get local chain, swarm and pubkey_bin
     LocalChain = blockchain_worker:blockchain(),
-    LocalSwarm = blockchain_swarm:swarm(),
+    LocalSwarm = blockchain_swarm:tid(),
     _LocalPubkeyBin = blockchain_swarm:pubkey_bin(),
 
     %% Check that the meck txn forwarding works
@@ -663,21 +645,17 @@ follow_sc_test(Config) ->
     {true, SC1} = check_sc_open(RouterNode, RouterChain, RouterPubkeyBin, ID1),
     %% Checking that state channel 2 got created properly
     {true, SC2} = check_sc_open(RouterNode, RouterChain, RouterPubkeyBin, ID2),
+    ct:pal("SC1: ~p", [SC1]),
+    ct:pal("SC2: ~p", [SC2]),
 
-    %% Check that the nonce of the sc server is okay
-    ok = sibyl_ct_utils:wait_until(
-        fun() ->
-            {ok, 0} == ct_rpc:call(RouterNode, blockchain_state_channels_server, nonce, [ID1])
-        end,
-        30,
-        timer:seconds(1)
-    ),
-
-    %% get the open state channels ID
-    [ActiveSCID] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_ids, []),
-    %% pull the active SC from the router node, we will need it in for our close txn
-    [ActiveSCPB] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_scs, []),
-    ct:pal("ActiveSCPB: ~p", [ActiveSCPB]),
+    %% pull the active SC from the router node, confirm it has same ID as one from ledger
+    %% and then use it to test the is_valid GRPC api
+    ActiveSCs = ct_rpc:call(RouterNode, blockchain_state_channels_server, get_actives, []),
+    ct:pal("ActiveSCs: ~p", [ActiveSCs]),
+    ?assert(maps:is_key(ID1, ActiveSCs)),
+    {ActiveSCPB1, ActiveSCPB1Status, _} = maps:get(ID1, ActiveSCs),
+    ct:pal("ActiveSCPB: ~p", [ActiveSCPB1]),
+    ?assertEqual(active, ActiveSCPB1Status),
 
     %% setup a 'follow' streamed connection to server
     {ok, Stream} = grpc_client:new_stream(
@@ -686,13 +664,16 @@ follow_sc_test(Config) ->
         follow_sc,
         gateway_client_pb
     ),
+    ct:pal("ID1 ~p", [ID1]),
+    ct:pal("owner ~p", [blockchain_ledger_state_channel_v2:owner(SC1)]),
 
-    %% setup the follows for the two SCs
-    ?assertEqual(ID1, ActiveSCID),
-    ok = grpc_client:send(Stream, #{
-        sc_id => ID1,
-        sc_owner => blockchain_ledger_state_channel_v2:owner(SC1)
-    }),
+    ok = grpc_client:send(
+        Stream,
+        #{
+            sc_id => ID1,
+            sc_owner => blockchain_ledger_state_channel_v2:owner(SC1)
+        }
+    ),
     ok = grpc_client:send(Stream, #{
         sc_id => ID2,
         sc_owner => blockchain_ledger_state_channel_v2:owner(SC2)
@@ -728,7 +709,7 @@ follow_sc_test(Config) ->
         Data0 = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Data0: ~p", [Data0]),
     #{sc_id := Data0SCID1, close_state := Data0CloseState} = Data0FollowMsg,
-    ?assertEqual(ActiveSCID, Data0SCID1),
+    ?assertEqual(ID1, Data0SCID1),
     ?assertEqual(close_state_closable, Data0CloseState),
 
     %% add additional blocks to trigger the closing state
@@ -748,7 +729,7 @@ follow_sc_test(Config) ->
         Data1 = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Data1: ~p", [Data1]),
     #{sc_id := Data1SCID1, close_state := Data1CloseState} = Data1FollowMsg,
-    ?assertEqual(ActiveSCID, Data1SCID1),
+    ?assertEqual(ID1, Data1SCID1),
     ?assertEqual(close_state_closing, Data1CloseState),
 
     %% wait until we see a close txn for SC1
@@ -767,7 +748,7 @@ follow_sc_test(Config) ->
                 Self,
                 LocalSwarm
             )
-    after 10000 -> ct:fail("txn timeout")
+    after 10000 -> ct:fail("failed to receive SC close txn for SC1")
     end,
     ok = sibyl_ct_utils:wait_until_local_height(15),
 
@@ -786,16 +767,20 @@ follow_sc_test(Config) ->
         Data2 = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Data2: ~p", [Data2]),
     #{sc_id := Data2SCID1, close_state := Data2CloseState} = Data2FollowMsg,
-    ?assertEqual(ActiveSCID, Data2SCID1),
+    ?assertEqual(ID1, Data2SCID1),
     ?assertEqual(close_state_closed, Data2CloseState),
 
     %%
     %% SC1 is now closed, SC2 should be the active SC
     %%
-    [ActiveSCID2] = ct_rpc:call(RouterNode, blockchain_state_channels_server, active_sc_ids, []),
-    ct:pal("ActiveSCID2: ~p", [ActiveSCID2]),
-    %% check that the ids differ, make sure we have a new SC
-    ?assertNotEqual(ActiveSCID, ActiveSCID2),
+    %% pull the active SC from the router node, confirm it has same ID as one from ledger
+    %% and then use it to test the is_valid GRPC api
+    ActiveSCs2 = ct_rpc:call(RouterNode, blockchain_state_channels_server, get_actives, []),
+    ct:pal("ActiveSCs2: ~p", [ActiveSCs2]),
+    ?assert(maps:is_key(ID2, ActiveSCs2)),
+    {ActiveSCPB2, ActiveSCPBStatus2, _} = maps:get(ID2, ActiveSCs2),
+    ct:pal("ActiveSCPB2: ~p", [ActiveSCPB2]),
+    ?assertEqual(active, ActiveSCPBStatus2),
 
     %% Adding fake blocks to get state channel 2 to expire
     ok = sibyl_ct_utils:local_add_and_gossip_fake_blocks(
@@ -816,7 +801,7 @@ follow_sc_test(Config) ->
         Data3 = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Data3: ~p", [Data3]),
     #{sc_id := Data3SCID2, close_state := Data3CloseState} = Data3FollowMsg,
-    ?assertEqual(ActiveSCID2, Data3SCID2),
+    ?assertEqual(ID2, Data3SCID2),
     ?assertEqual(Data3CloseState, close_state_closable),
 
     ok = sibyl_ct_utils:local_add_and_gossip_fake_blocks(
@@ -833,7 +818,7 @@ follow_sc_test(Config) ->
         Data4 = grpc_client:rcv(Stream, 5000),
     ct:pal("Response Data4: ~p", [Data4]),
     #{sc_id := Data4SCID2, close_state := Data4CloseState} = Data4FollowMsg,
-    ?assertEqual(ActiveSCID2, Data4SCID2),
+    ?assertEqual(ID2, Data4SCID2),
     ?assertEqual(Data4CloseState, close_state_closing),
 
     %% wait until we see a close txn for SC2
@@ -852,7 +837,7 @@ follow_sc_test(Config) ->
                 Self,
                 LocalSwarm
             )
-    after 10000 -> ct:fail("txn timeout")
+    after 10000 -> ct:fail("failed to receive SC close txn for SC2")
     end,
     %% we expect the closed at block height 21, push 1 beyond and confirm the height in the payload is as expected
     ok = sibyl_ct_utils:local_add_and_gossip_fake_blocks(
@@ -869,7 +854,7 @@ follow_sc_test(Config) ->
         Data5 = grpc_client:rcv(Stream, 8000),
     ct:pal("Response Data5: ~p", [Data5]),
     #{sc_id := Data5SCID2, close_state := Data5CloseState} = Data5FollowMsg,
-    ?assertEqual(ActiveSCID2, Data5SCID2),
+    ?assertEqual(ID2, Data5SCID2),
     ?assertEqual(Data5CloseState, close_state_closed),
 
     ok.

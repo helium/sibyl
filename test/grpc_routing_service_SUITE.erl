@@ -79,7 +79,7 @@ init_per_testcase(TestCase, Config) ->
     ok = sibyl_ct_utils:wait_until_local_height(1),
 
     %% connect the local node to the slaves
-    LocalSwarm = blockchain_swarm:swarm(),
+    LocalSwarm = blockchain_swarm:tid(),
     ok = lists:foreach(
         fun(Node) ->
             NodeSwarm = ct_rpc:call(Node, blockchain_swarm, swarm, [], 2000),
@@ -103,7 +103,7 @@ init_per_testcase(TestCase, Config) ->
     ),
 
     %% setup come onchain requirements for the local node
-    Swarm = blockchain_swarm:swarm(),
+    Swarm = blockchain_swarm:tid(),
     ConsensusMembers = ?config(consensus_members, Config1),
     Chain = blockchain_worker:blockchain(),
     ct:pal("localchain : ~p", [Chain]),
@@ -126,7 +126,7 @@ init_per_testcase(TestCase, Config) ->
     ?assertEqual({error, not_found}, blockchain_ledger_v1:find_routing(OUI1, Ledger)),
 
     {ok, Block0} = sibyl_ct_utils:create_block(ConsensusMembers, [SignedOUITxn0]),
-    _ = blockchain_gossip_handler:add_block(Block0, Chain, self(), blockchain_swarm:swarm()),
+    _ = blockchain_gossip_handler:add_block(Block0, Chain, self(), blockchain_swarm:tid()),
 
     ok = sibyl_ct_utils:wait_until(fun() -> {ok, 2} == blockchain:height(Chain) end),
 
@@ -195,6 +195,7 @@ routing_updates_with_initial_msg_test(Config) ->
     Connection = ?config(grpc_connection, Config),
     Stream = ?config(grpc_stream, Config),
     OUI1 = ?config(oui1, Config),
+    LocalSwarm = blockchain_swarm:tid(),
 
     %% send the initial msg from the client with its safe height value
     grpc_client:send(Stream, #{height => 1}),
@@ -239,7 +240,7 @@ routing_updates_with_initial_msg_test(Config) ->
     OUITxn1 = blockchain_txn_routing_v1:update_router_addresses(OUI1, Payer, Addresses1, 1),
     SignedOUITxn1 = blockchain_txn_routing_v1:sign(OUITxn1, SigFun),
     {ok, Block1} = sibyl_ct_utils:create_block(ConsensusMembers, [SignedOUITxn1]),
-    _ = blockchain_gossip_handler:add_block(Block1, Chain, self(), blockchain_swarm:swarm()),
+    _ = blockchain_gossip_handler:add_block(Block1, Chain, self(), blockchain_swarm:tid()),
 
     ok = sibyl_ct_utils:wait_until(fun() -> {ok, 3} == blockchain:height(Chain) end),
 
@@ -262,7 +263,7 @@ routing_updates_with_initial_msg_test(Config) ->
     OUITxn2 = blockchain_txn_oui_v1:new(OUI2, Payer, Addresses2, Filter2, 8),
     SignedOUITxn2 = blockchain_txn_oui_v1:sign(OUITxn2, SigFun),
     {ok, Block2} = sibyl_ct_utils:create_block(ConsensusMembers, [SignedOUITxn2]),
-    _ = blockchain_gossip_handler:add_block(Block2, Chain, self(), blockchain_swarm:swarm()),
+    _ = blockchain_gossip_handler:add_block(Block2, Chain, self(), blockchain_swarm:tid()),
 
     ok = sibyl_ct_utils:wait_until(fun() -> {ok, 4} == blockchain:height(Chain) end),
 
@@ -273,6 +274,17 @@ routing_updates_with_initial_msg_test(Config) ->
     {data, Routes2} = grpc_client:rcv(Stream, 5000),
     ct:pal("Route Update: ~p", [Routes2]),
     assert_route_update(Routes2, ExpRoutes2),
+
+    %% wait a bunch of blocks and confirm we dont get any unexpected / stray updates
+    ok = sibyl_ct_utils:local_add_and_gossip_fake_blocks(
+        7,
+        ConsensusMembers,
+        LocalSwarm,
+        Chain,
+        self()
+    ),
+    ok = sibyl_ct_utils:wait_until_local_height(11),
+    empty = grpc_client:get(Stream),
 
     grpc_client:stop_stream(Stream),
     grpc_client:stop_connection(Connection),
@@ -292,9 +304,10 @@ routing_updates_without_initial_msg_test(Config) ->
     %% get current height and add 1 and use for client header
     {ok, CurHeight0} = blockchain:height(Chain),
     ClientHeaderHeight = CurHeight0 + 1,
+    ct:pal("ClientHeaderHeight: ~p", [ClientHeaderHeight]),
 
     %% the stream requires an empty msg to be sent in order to initialise the service
-    grpc_client:send(Stream, #{height => ClientHeaderHeight}),
+    grpc_client:send(Stream, #{height => 3}),
 
     %% we do not expect to receive a response containing all the added routes from the init_per_testcase step
     %% this is because the client supplied a height value greater than the height at which routes were last modified
@@ -324,7 +337,7 @@ routing_updates_without_initial_msg_test(Config) ->
     OUITxn1 = blockchain_txn_routing_v1:update_router_addresses(OUI1, Payer, Addresses1, 1),
     SignedOUITxn1 = blockchain_txn_routing_v1:sign(OUITxn1, SigFun),
     {ok, Block1} = sibyl_ct_utils:create_block(ConsensusMembers, [SignedOUITxn1]),
-    _ = blockchain_gossip_handler:add_block(Block1, Chain, self(), blockchain_swarm:swarm()),
+    _ = blockchain_gossip_handler:add_block(Block1, Chain, self(), blockchain_swarm:tid()),
 
     ok = sibyl_ct_utils:wait_until(fun() -> {ok, 3} == blockchain:height(Chain) end),
 
