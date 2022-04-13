@@ -297,7 +297,13 @@ is_active_sc_test(Config) ->
     #{<<":status">> := HttpStatus1} = Headers1,
     ?assertEqual(HttpStatus1, <<"200">>),
     ?assertEqual(
-        ResponseMsg1#{sc_id := SCID, sc_owner := SCOwner, active := true},
+        ResponseMsg1#{
+            sc_id := SCID,
+            sc_owner := SCOwner,
+            active := true,
+            sc_expiry_at_block := 12,
+            sc_original_dc_amount := 20
+        },
         ResponseMsg1
     ),
 
