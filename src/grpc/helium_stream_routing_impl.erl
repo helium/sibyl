@@ -34,7 +34,10 @@ routing(#gateway_routing_req_v1_pb{height = ClientHeight} = Msg, StreamState) ->
     #{streaming_initialized := StreamingInitialized} = grpcbox_stream:stream_handler_state(
         StreamState
     ),
-    routing(StreamingInitialized, sibyl_mgr:blockchain(), Msg, StreamState).
+    routing(StreamingInitialized, sibyl_mgr:blockchain(), Msg, StreamState);
+routing(_Msg, StreamState) ->
+    lager:warning("unhandled msg ~p", [_Msg]),
+    {ok, StreamState}.
 
 -spec routing(
     boolean(),

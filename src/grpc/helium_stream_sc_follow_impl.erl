@@ -72,7 +72,10 @@ follow_sc(#gateway_sc_follow_req_v1_pb{sc_id = SCID, sc_owner = SCOwner} = Msg, 
     Chain = sibyl_mgr:blockchain(),
     #{sc_follows := SCFollows} = grpcbox_stream:stream_handler_state(StreamState),
     Key = blockchain_ledger_v1:state_channel_key(SCID, SCOwner),
-    follow_sc(Chain, maps:is_key(Key, SCFollows), Msg, StreamState).
+    follow_sc(Chain, maps:is_key(Key, SCFollows), Msg, StreamState);
+follow_sc(_Msg, StreamState) ->
+    lager:warning("unhandled msg ~p", [_Msg]),
+    {ok, StreamState}.
 
 -spec handle_info(any(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info({blockchain_event, {add_block, BlockHash, _Sync, _Ledger} = _Event}, StreamState) ->

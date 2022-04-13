@@ -39,7 +39,10 @@ pocs(#gateway_poc_req_v1_pb{} = Msg, StreamState) ->
     #{streaming_initialized := StreamingInitialized} = grpcbox_stream:stream_handler_state(
         StreamState
     ),
-    pocs(Chain, StreamingInitialized, Msg, StreamState).
+    pocs(Chain, StreamingInitialized, Msg, StreamState);
+pocs(_Msg, StreamState) ->
+    lager:warning("unhandled msg ~p", [_Msg]),
+    {ok, StreamState}.
 
 -spec handle_info(sibyl_mgr:event() | any(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info(

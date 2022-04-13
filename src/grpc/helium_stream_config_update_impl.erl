@@ -35,7 +35,10 @@ config_update(#gateway_config_update_req_v1_pb{} = Msg, StreamState) ->
     #{streaming_initialized := StreamingInitialized} = grpcbox_stream:stream_handler_state(
         StreamState
     ),
-    config_update(Chain, StreamingInitialized, Msg, StreamState).
+    config_update(Chain, StreamingInitialized, Msg, StreamState);
+config_update(_Msg, StreamState) ->
+    lager:warning("unhandled msg ~p", [_Msg]),
+    {ok, StreamState}.
 
 handle_info(
     {config_update_notify, Msg},

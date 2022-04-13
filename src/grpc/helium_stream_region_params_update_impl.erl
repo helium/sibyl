@@ -35,7 +35,10 @@ region_params_update(#gateway_region_params_update_req_v1_pb{} = Msg, StreamStat
     #{streaming_initialized := StreamingInitialized} = grpcbox_stream:stream_handler_state(
         StreamState
     ),
-    region_params_update(Chain, StreamingInitialized, Msg, StreamState).
+    region_params_update(Chain, StreamingInitialized, Msg, StreamState);
+region_params_update(_Msg, StreamState) ->
+    lager:warning("unhandled msg ~p", [_Msg]),
+    {ok, StreamState}.
 
 handle_info(
     {asserted_gw_notify, Addr},
