@@ -56,11 +56,27 @@ is_active_sc(
     #gateway_sc_is_active_req_v1_pb{sc_id = SCID, sc_owner = SCOwner} = _Message
 ) ->
     lager:debug("executing RPC is_active with msg ~p", [_Message]),
-    Response0 = #gateway_sc_is_active_resp_v1_pb{
-        active = check_is_active_sc(SCID, SCOwner, Chain),
-        sc_id = SCID,
-        sc_owner = SCOwner
-    },
+    Ledger = blockchain:ledger(Chain),
+    Response0 =
+        case get_ledger_state_channel(SCID, SCOwner, Ledger) of
+            {ok, Mod, SC} ->
+                #gateway_sc_is_active_resp_v1_pb{
+                    active = true,
+                    sc_id = SCID,
+                    sc_owner = SCOwner,
+                    sc_expiry_at_block = Mod:expire_at_block(SC),
+                    sc_original_dc_amount = get_sc_original(Mod, SC)
+                };
+            _ ->
+                #gateway_sc_is_active_resp_v1_pb{
+                    active = false,
+                    sc_id = SCID,
+                    sc_owner = SCOwner,
+                    sc_expiry_at_block = undefined,
+                    sc_original_dc_amount = undefined
+                }
+        end,
+
     Response1 = sibyl_utils:encode_gateway_resp_v1(
         Response0,
         sibyl_mgr:sigfun()
@@ -153,3 +169,14 @@ get_ledger_state_channel(SCID, Owner, Ledger) ->
         {ok, Mod, SC} -> {ok, Mod, SC};
         _ -> {error, inactive_sc}
     end.
+
+-spec get_sc_original(
+    blockchain_ledger_state_channel_v1
+    | blockchain_ledger_state_channel_v2,
+    blockchain_ledger_state_channel_v1:state_channel()
+    | blockchain_ledger_state_channel_v2:state_channel()
+) -> non_neg_integer().
+get_sc_original(blockchain_ledger_state_channel_v1, _SC) ->
+    0;
+get_sc_original(blockchain_ledger_state_channel_v2, SC) ->
+    blockchain_ledger_state_channel_v2:original(SC).
