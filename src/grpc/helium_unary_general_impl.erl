@@ -172,7 +172,7 @@ validators(
     %% and then get a random sub set of these with size
     %% equal to NumVals
     IgnoreVals = application:get_env(sibyl, validator_ignore_list, []),
-    lager:info("ignoring validators: ~p", [IgnoreVals]),
+    lager:debug("ignoring validators: ~p", [IgnoreVals]),
     Vals = sibyl_mgr:validators(),
     Vals1 = lists:filter(
         fun({PubKeyBin, _URL}) -> not lists:member(PubKeyBin, IgnoreVals) end,
