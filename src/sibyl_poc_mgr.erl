@@ -161,7 +161,7 @@ run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, Vars) ->
             noop;
         {ok, {HexList, Hex, HexRandState}} ->
             %% get all GWs in this zone
-            {ok, ZoneGWs} = blockchain_poc_target_v5:gateways_for_zone(
+            {ok, ZoneGWs} = TargetMod:gateways_for_zone(
                 ChallengerAddr,
                 Ledger,
                 Vars,
