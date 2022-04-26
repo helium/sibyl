@@ -151,7 +151,7 @@ check_if_reactivated_gw(GWAddr, Chain) ->
                     %% this means it will become available for POC
                     true = sibyl_poc_mgr:cache_reactivated_gw(GWAddr);
                 {ok, C} ->
-                    {ok, MaxActivityAge} = blockchain:config(poc_v4_target_challenge_age, Ledger),
+                    {ok, MaxActivityAge} = blockchain:config(hip17_interactivity_blocks, Ledger),
                     case (CurHeight - C) > MaxActivityAge of
                         true -> true = sibyl_poc_mgr:cache_reactivated_gw(GWAddr);
                         false -> ok
