@@ -178,21 +178,19 @@ streaming_region_params_test(Config) ->
     ?assertEqual(ok, blockchain_txn_add_gateway_v1:is_valid(SignedAddGatewayTx2, Chain)),
 
     %% assert gateway 1
-    AssertLocationRequestTx = blockchain_txn_assert_location_v1:new(
+    AssertLocationRequestTx = blockchain_txn_assert_location_v2:new(
         Gateway, Owner, Payer, ?TEST_LOCATION, 1
     ),
-    SignedAssertLocationTx0 = blockchain_txn_assert_location_v1:sign_request(
-        AssertLocationRequestTx, GatewaySigFun
+    AssertLocationRequestTx1 = blockchain_txn_assert_location_v2:gain(AssertLocationRequestTx, 50),
+    SignedAssertLocationTx0 = blockchain_txn_assert_location_v2:sign(
+        AssertLocationRequestTx1, OwnerSigFun
     ),
-    SignedAssertLocationTx1 = blockchain_txn_assert_location_v1:sign(
-        SignedAssertLocationTx0, OwnerSigFun
-    ),
-    SignedAssertLocationTx2 = blockchain_txn_assert_location_v1:sign_payer(
-        SignedAssertLocationTx1, PayerSigFun
+    SignedAssertLocationTx1 = blockchain_txn_assert_location_v2:sign_payer(
+        SignedAssertLocationTx0, PayerSigFun
     ),
 
     {ok, Block1} = sibyl_ct_utils:create_block(ConsensusMembers, [
-        SignedAddGatewayTx2, SignedAssertLocationTx2
+        SignedAddGatewayTx2, SignedAssertLocationTx1
     ]),
     _ = blockchain_gossip_handler:add_block(Block1, Chain, self(), blockchain_swarm:tid()),
     ok = sibyl_ct_utils:wait_until(fun() -> {ok, 2} == blockchain:height(Chain) end),
@@ -233,20 +231,22 @@ streaming_region_params_test(Config) ->
         block_age := _ResponseBlockAge1,
         signature := _ResponseSig1
     } = Result1,
-    #{region := ReturnedRegion, params := _ReturnedParams, address := Gateway} = ResponseMsg1,
+    #{  region := ReturnedRegion,
+        params := _ReturnedParams,
+        address := Gateway,
+        gain := Gain} = ResponseMsg1,
     ?assertEqual(ReturnedRegion, 'US915'),
+    ?assertEqual(Gain, 50),
 
     %% now reassert the GW and confirm we get a streams region params update
-    AssertLocation2RequestTx = blockchain_txn_assert_location_v1:new(
+    AssertLocation2RequestTx = blockchain_txn_assert_location_v2:new(
         Gateway, Owner, Payer, ?TEST_LOCATION2, 2
     ),
-    SignedAssertLocation2Tx0 = blockchain_txn_assert_location_v1:sign_request(
-        AssertLocation2RequestTx, GatewaySigFun
+    AssertLocation2RequestTx1 = blockchain_txn_assert_location_v2:gain(AssertLocation2RequestTx, 80),
+    SignedAssertLocation2Tx1 = blockchain_txn_assert_location_v2:sign(
+        AssertLocation2RequestTx1, OwnerSigFun
     ),
-    SignedAssertLocation2Tx1 = blockchain_txn_assert_location_v1:sign(
-        SignedAssertLocation2Tx0, OwnerSigFun
-    ),
-    SignedAssertLocation2Tx2 = blockchain_txn_assert_location_v1:sign_payer(
+    SignedAssertLocation2Tx2 = blockchain_txn_assert_location_v2:sign_payer(
         SignedAssertLocation2Tx1, PayerSigFun
     ),
 
@@ -271,8 +271,12 @@ streaming_region_params_test(Config) ->
         block_age := _ResponseBlockAge2,
         signature := _ResponseSig2
     } = Result2,
-    #{region := ReturnedRegion2, params := _ReturnedParams2, address := Gateway} = ResponseMsg2,
+    #{  region := ReturnedRegion2,
+        params := _ReturnedParams2,
+        address := Gateway,
+        gain := Gain2} = ResponseMsg2,
     ?assertEqual(ReturnedRegion2, 'US915'),
+    ?assertEqual(Gain2, 80),
     ok.
 %% ------------------------------------------------------------------
 %% Helper functions

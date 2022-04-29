@@ -537,7 +537,10 @@ initialize_nodes(TestCase, Config) ->
         ?validator_liveness_interval => 5,
         ?validator_key_check => true,
         ?stake_withdrawal_cooldown => 10,
-        ?stake_withdrawal_max => 500
+        ?stake_withdrawal_max => 500,
+        ?assert_loc_txn_version => 2,
+        ?max_antenna_gain => 150,
+        ?min_antenna_gain => 10
     },
 
     {InitialTxns, MasterKeyConfig} = create_vars(
