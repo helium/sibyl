@@ -122,8 +122,9 @@ region_params_update(
 -spec region_params_for_addr(libp2p_crypto:pubkey_bin(), blockchain_ledger_v1:ledger()) ->
     {ok, #gateway_region_params_streamed_resp_v1_pb{}} | {error, any()}.
 region_params_for_addr(Addr, Ledger) ->
-    case blockchain_ledger_v1:find_gateway_location(Addr, Ledger) of
-        {ok, Location} ->
+    case blockchain_ledger_v1:find_gateway_info(Addr, Ledger) of
+        {ok, GWInfo} ->
+            Location = blockchain_ledger_gateway_v2:location(GWInfo),
             case blockchain_region_v1:h3_to_region(Location, Ledger) of
                 {ok, Region} ->
                     case blockchain_region_params_v1:for_region(Region, Ledger) of
@@ -134,8 +135,10 @@ region_params_for_addr(Addr, Ledger) ->
                             ),
                             {error, no_params_for_region};
                         {ok, Params} ->
+                            Gain = blockchain_ledger_gateway_v2:gain(GWInfo),
                             {ok, #gateway_region_params_streamed_resp_v1_pb{
                                 address = Addr,
+                                gain = Gain,
                                 region = normalize_region(Region),
                                 params = #blockchain_region_params_v1_pb{
                                     region_params = Params

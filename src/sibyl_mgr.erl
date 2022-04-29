@@ -332,34 +332,35 @@ update_validator_cache(Ledger) ->
             {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
             Vals =
                 blockchain_ledger_v1:cf_fold(
-                  validators,
-                  fun({Addr, BinVal}, Acc) ->
-                          Validator = blockchain_ledger_validator_v1:deserialize(BinVal),
-                          case
-                              (blockchain_ledger_validator_v1:last_heartbeat(Validator) +
-                                   HBInterval + HBGrace) >=
-                              CurHeight
-                          of
-                              true ->
-                                  case get_validator_routing(Addr) of
-                                      {ok, URI} ->
-                                [{Addr, URI} | Acc];
-                                      {error, _} ->
-                                          Acc
-                                  end;
-                              false ->
-                                  Acc
-                          end
-                  end,
-                  [],
-                  Ledger
-                 ),
+                    validators,
+                    fun({Addr, BinVal}, Acc) ->
+                        Validator = blockchain_ledger_validator_v1:deserialize(BinVal),
+                        case
+                            (blockchain_ledger_validator_v1:last_heartbeat(Validator) +
+                                HBInterval + HBGrace) >=
+                                CurHeight
+                        of
+                            true ->
+                                case get_validator_routing(Addr) of
+                                    {ok, URI} ->
+                                        [{Addr, URI} | Acc];
+                                    {error, _} ->
+                                        Acc
+                                end;
+                            false ->
+                                Acc
+                        end
+                    end,
+                    [],
+                    Ledger
+                ),
             _ = ets:insert(?TID, {?VALIDATORS, Vals}),
             %% keep a count of the number of vals in our cache
             _ = ets:insert(?TID, {?VALIDATOR_COUNT, length(Vals)}),
             ok;
         %% liveness not set, vals not enabled, skip for now
-        _ -> ok
+        _ ->
+            ok
     end.
 
 %% get a public route to the specified validator
