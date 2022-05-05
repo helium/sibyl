@@ -146,6 +146,9 @@ check_if_reactivated_gw(GWAddr, Chain) ->
     case blockchain:config(poc_activity_filter_enabled, Ledger) of
         {ok, true} ->
             case blockchain_ledger_v1:find_gateway_last_challenge(GWAddr, Ledger) of
+                {error, _Reason} ->
+                    %% if GW not found or some other issue, ignore
+                    ok;
                 {ok, undefined} ->
                     %% No activity set, so include in list to reactivate
                     %% this means it will become available for POC
