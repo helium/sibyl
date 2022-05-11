@@ -74,6 +74,10 @@ check_challenge_target(
             {grpc_error, {grpcbox_stream:code_to_status(14), <<"bad signature">>}};
         true ->
             %% are we the target  ?
+            lager:info(
+                "checking if GW ~p is target for poc key ~p",
+                [ChallengeePubKeyBin, POCKey]
+            ),
             {ok, POCMgr} = application:get_env(sibyl, poc_mgr_mod),
             Response0 =
                 case POCMgr:check_target(ChallengeePubKeyBin, BlockHash, POCKey) of
