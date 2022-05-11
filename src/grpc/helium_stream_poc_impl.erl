@@ -115,7 +115,7 @@ pocs(
             %% streamed msgs will be received & published by the sibyl_poc_mgr
             %% streamed POC msgs will be potential challenge notifications
             Topic = sibyl_utils:make_poc_topic(Addr),
-            lager:debug("subscribing to poc events for gw ~p", [Addr]),
+            lager:info("gw ~p is subscribing to poc events", [Addr]),
             ok = sibyl_bus:sub(Topic, self()),
             HandlerState = grpcbox_stream:stream_handler_state(StreamState),
             NewStreamState = grpcbox_stream:stream_handler_state(
