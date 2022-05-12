@@ -135,18 +135,6 @@ close_sc(_Chain, Ctx, #gateway_sc_close_req_v1_pb{close_txn = CloseTxn} = _Messa
 %% Internal functions
 %% ------------------------------------------------------------------
 
--spec check_is_active_sc(
-    SCID :: binary(),
-    SCOwner :: libp2p_crypto:pubkey_bin(),
-    Chain :: blockchain:blockchain()
-) -> true | false.
-check_is_active_sc(SCID, SCOwner, Chain) ->
-    Ledger = blockchain:ledger(Chain),
-    case get_ledger_state_channel(SCID, SCOwner, Ledger) of
-        {ok, _Mod, _SC} -> true;
-        _ -> false
-    end.
-
 -spec check_is_overpaid_sc(
     SCID :: binary(),
     SCOwner :: libp2p_crypto:pubkey_bin(),
