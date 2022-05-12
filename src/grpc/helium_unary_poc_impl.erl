@@ -2,6 +2,7 @@
 
 -include("../../include/sibyl.hrl").
 -include("../grpc/autogen/server/gateway_pb.hrl").
+-include_lib("blockchain/include/blockchain_utils.hrl").
 
 -export([
     check_challenge_target/2,
@@ -76,7 +77,7 @@ check_challenge_target(
             %% are we the target  ?
             lager:info(
                 "checking if GW ~p is target for poc key ~p",
-                [ChallengeePubKeyBin, POCKey]
+                [?TO_ANIMAL_NAME(ChallengeePubKeyBin), POCKey]
             ),
             {ok, POCMgr} = application:get_env(sibyl, poc_mgr_mod),
             Response0 =
