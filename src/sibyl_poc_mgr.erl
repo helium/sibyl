@@ -127,10 +127,9 @@ terminate(_Reason, _State = #state{}) ->
 %%% Internal functions
 %%%===================================================================
 handle_poc_event(
-    {poc_keys, {_BlockHeight, BlockHash, BlockPOCs}},
-    State = #state{chain = Chain}
+    {poc_keys, {_BlockHeight, BlockHash, BlockPOCs, Ledger}},
+    State
 ) ->
-    Ledger = blockchain:ledger(Chain),
     Vars = blockchain_utils:vars_binary_keys_to_atoms(
         maps:from_list(blockchain_ledger_v1:snapshot_vars(Ledger))
     ),
