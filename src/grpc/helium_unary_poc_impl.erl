@@ -164,6 +164,12 @@ send_report(
                                 }
                         end;
                     _ ->
+                        lager:warning(
+                            "received report for unknown POC. Report: ~p, OnionKeyHash: ~p",
+                            [
+                                Report, OnionKeyHash
+                            ]
+                        ),
                         #gateway_error_resp_pb{
                             error = <<"invalid onion key hash">>, details = OnionKeyHash
                         }

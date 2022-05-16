@@ -57,7 +57,7 @@ handle_info(
     {poc_notify, Msg},
     StreamState
 ) ->
-    lager:debug("received poc msg, sending to client ~p", [Msg]),
+    lager:info("sending poc notification to connected gw ~p", [Msg]),
     %% received a poc notification event, we simply have to forward this unmodified to the client
     %% the payload is fully formed and encoded
     NewStreamState = grpcbox_stream:send(false, Msg, StreamState),
