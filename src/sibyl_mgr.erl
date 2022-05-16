@@ -8,7 +8,6 @@
 
 -define(TID, val_mgr).
 -define(CHAIN, blockchain).
--define(HEIGHT, height).
 -define(SIGFUN, sigfun).
 -define(SERVER, ?MODULE).
 -define(VALIDATORS, validators).
@@ -54,7 +53,6 @@
     update_last_modified/2,
     get_last_modified/1,
     blockchain/0,
-    height/0,
     sigfun/0,
     validators/0,
     validator_count/0
@@ -95,14 +93,6 @@ get_last_modified(Event) ->
 -spec blockchain() -> blockchain:blockchain() | undefined.
 blockchain() ->
     try ets:lookup_element(?TID, ?CHAIN, 2) of
-        X -> X
-    catch
-        _:_ -> undefined
-    end.
-
--spec height() -> non_neg_integer() | undefined.
-height() ->
-    try ets:lookup_element(?TID, ?HEIGHT, 2) of
         X -> X
     catch
         _:_ -> undefined
@@ -179,10 +169,8 @@ handle_info(setup, State) ->
             Ledger = blockchain:ledger(Chain),
             ok = blockchain_event:add_handler(self()),
             {ok, _, SigFun, _} = blockchain_swarm:keys(),
-            {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
             ets:insert(?TID, {?CHAIN, Chain}),
             ets:insert(?TID, {?SIGFUN, SigFun}),
-            ets:insert(?TID, {?HEIGHT, CurHeight}),
             {ok, Refs} = add_commit_hooks(),
             ok = update_validator_cache(Ledger),
             ok = subscribe_to_events(),
