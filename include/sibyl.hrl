@@ -7,6 +7,7 @@
 -define(EVENT_POC_NOTIFICATION, <<"poc_notification">>).
 -define(EVENT_CONFIG_UPDATE_NOTIFICATION, <<"config_update_notification">>).
 -define(EVENT_ASSERTED_GW_NOTIFICATION, <<"asserted_gw_notification">>).
+-define(EVENT_ACTIVITY_CHECK_NOTIFICATION, <<"activity_check_notification">>).
 
 -define(ALL_EVENTS, [
     ?EVENT_ROUTING_UPDATE,
@@ -16,4 +17,5 @@
     ?EVENT_POC_NOTIFICATION,
     ?EVENT_CONFIG_UPDATE_NOTIFICATION,
     ?EVENT_ASSERTED_GW_NOTIFICATION
+    ?EVENT_ACTIVITY_CHECK_NOTIFICATION
 ]).

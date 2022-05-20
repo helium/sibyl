@@ -21,6 +21,12 @@
 -define(VALIDATOR_CACHE_REFRESH, 100).
 -endif.
 
+-ifdef(TEST).
+-define(ACTIVITY_CHECK_PERIOD, 5).
+-else.
+-define(ACTIVITY_CHECK_PERIOD, 360).
+-endif.
+
 -record(state, {
     tid :: ets:tab(),
     commit_hook_refs = [] :: list()
@@ -245,7 +251,21 @@ process_add_block_event({add_block, BlockHash, _Sync, Ledger}, _State) ->
             %% check if there are any assert v2 txns in the block
             %% for each publish a notification to subsribed clients
             %% containing the Addr of the updated GW
-            ok = check_for_asserts(Block);
+            ok = check_for_asserts(Block),
+
+            %% every 6 hours fire an event to run an activity check
+            %% on connected streams
+            case BlockHeight rem ?ACTIVITY_CHECK_PERIOD == 0 of
+                true ->
+                    lager:debug("publishing activity check event"),
+                    sibyl_bus:pub(
+                        ?EVENT_ACTIVITY_CHECK_NOTIFICATION,
+                        sibyl_utils:make_event(?EVENT_ACTIVITY_CHECK_NOTIFICATION)
+                    ),
+                    ok;
+                false ->
+                    ok
+            end;
         _ ->
             %% err what?
             ok
