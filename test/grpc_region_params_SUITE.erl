@@ -231,10 +231,12 @@ streaming_region_params_test(Config) ->
         block_age := _ResponseBlockAge1,
         signature := _ResponseSig1
     } = Result1,
-    #{  region := ReturnedRegion,
+    #{
+        region := ReturnedRegion,
         params := _ReturnedParams,
         address := Gateway,
-        gain := Gain} = ResponseMsg1,
+        gain := Gain
+    } = ResponseMsg1,
     ?assertEqual(ReturnedRegion, 'US915'),
     ?assertEqual(Gain, 50),
 
@@ -242,7 +244,9 @@ streaming_region_params_test(Config) ->
     AssertLocation2RequestTx = blockchain_txn_assert_location_v2:new(
         Gateway, Owner, Payer, ?TEST_LOCATION2, 2
     ),
-    AssertLocation2RequestTx1 = blockchain_txn_assert_location_v2:gain(AssertLocation2RequestTx, 80),
+    AssertLocation2RequestTx1 = blockchain_txn_assert_location_v2:gain(
+        AssertLocation2RequestTx, 80
+    ),
     SignedAssertLocation2Tx1 = blockchain_txn_assert_location_v2:sign(
         AssertLocation2RequestTx1, OwnerSigFun
     ),
@@ -271,10 +275,12 @@ streaming_region_params_test(Config) ->
         block_age := _ResponseBlockAge2,
         signature := _ResponseSig2
     } = Result2,
-    #{  region := ReturnedRegion2,
+    #{
+        region := ReturnedRegion2,
         params := _ReturnedParams2,
         address := Gateway,
-        gain := Gain2} = ResponseMsg2,
+        gain := Gain2
+    } = ResponseMsg2,
     ?assertEqual(ReturnedRegion2, 'US915'),
     ?assertEqual(Gain2, 80),
     ok.

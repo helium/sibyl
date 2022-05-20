@@ -6,7 +6,8 @@
 
 -type handler_state() :: #{
     mod => atom(),
-    streaming_initialized => boolean()
+    streaming_initialized => boolean(),
+    addr => libp2p_crypto:pubkey_bin()
 }.
 -export_type([handler_state/0]).
 
@@ -48,6 +49,13 @@ pocs(_Msg, StreamState) ->
 -spec handle_info(sibyl_mgr:event() | any(), grpcbox_stream:t()) -> grpcbox_stream:t().
 handle_info(
     {event, _EventTopic, _Payload} = Event,
+    StreamState
+) ->
+    lager:debug("received event ~p", [Event]),
+    NewStreamState = handle_event(Event, StreamState),
+    NewStreamState;
+handle_info(
+    {event, _EventTopic} = Event,
     StreamState
 ) ->
     lager:debug("received event ~p", [Event]),
@@ -112,17 +120,14 @@ pocs(
         false ->
             {grpc_error, {grpcbox_stream:code_to_status(14), <<"bad signature">>}};
         true ->
-            %% topic key for POC streams is the pub key bin
-            %% streamed msgs will be received & published by the sibyl_poc_mgr
-            %% streamed POC msgs will be potential challenge notifications
-            Topic = sibyl_utils:make_poc_topic(Addr),
             lager:info("gw ~p is subscribing to poc events", [?TO_ANIMAL_NAME(Addr)]),
-            ok = sibyl_bus:sub(Topic, self()),
+            ok = subscribe_to_events(Addr),
             HandlerState = grpcbox_stream:stream_handler_state(StreamState),
             NewStreamState = grpcbox_stream:stream_handler_state(
                 StreamState,
                 HandlerState#{
-                    streaming_initialized => true
+                    streaming_initialized => true,
+                    addr => Addr
                 }
             ),
             _ = check_if_reactivated_gw(Addr, Chain),
@@ -133,6 +138,23 @@ pocs(
 %% Internal functions
 %% ------------------------------------------------------------------
 -spec handle_event(sibyl_mgr:event(), grpcbox_stream:t()) -> grpcbox_stream:t().
+handle_event(
+    {event, ?EVENT_ACTIVITY_CHECK_NOTIFICATION} = _Event,
+    StreamState
+) ->
+    %% check if the connected GW has gone inactive
+    %% this can happen if the GW connects to the poc stream
+    %% & stays connected for a long period but fails
+    %% to get selected for a POC or fails to witness
+    %% a POC ( or maybe get their witnesses reports
+    %% filtered out )
+    %% To counter this we run a periodic check on
+    %% each GW to see if they have fallen inactive
+    %% if so reactivate them
+    Chain = sibyl_mgr:blockchain(),
+    #{addr := GWAddr} = grpcbox_stream:stream_handler_state(StreamState),
+    _ = check_if_reactivated_gw(GWAddr, Chain),
+    StreamState;
 handle_event(
     {event, _EventType, _Payload} = _Event,
     StreamState
@@ -157,11 +179,24 @@ check_if_reactivated_gw(GWAddr, Chain) ->
                 {ok, C} ->
                     {ok, MaxActivityAge} = blockchain:config(poc_v4_target_challenge_age, Ledger),
                     case (CurHeight - C) > MaxActivityAge of
-                        true -> true = sibyl_poc_mgr:cache_reactivated_gw(GWAddr);
-                        false -> ok
+                        true ->
+                            lager:debug("reactivating gw ~p", [?TO_ANIMAL_NAME(GWAddr)]),
+                            true = sibyl_poc_mgr:cache_reactivated_gw(GWAddr);
+                        false ->
+                            ok
                     end
             end;
         _ ->
             %% activity filter not set, do nothing
             ok
     end.
+
+-spec subscribe_to_events(libp2p_crypto:pubkey_bin()) -> ok.
+subscribe_to_events(Addr) ->
+    %% topic key for POC streams is the pub key bin
+    %% streamed msgs will be received & published by the sibyl_poc_mgr
+    %% streamed POC msgs will be potential challenge notifications
+    %% we also want to activity check events
+    POCTopic = sibyl_utils:make_poc_topic(Addr),
+    [sibyl_bus:sub(E, self()) || E <- [?EVENT_ACTIVITY_CHECK_NOTIFICATION, POCTopic]],
+    ok.
