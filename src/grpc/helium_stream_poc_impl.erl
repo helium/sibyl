@@ -2,6 +2,7 @@
 
 -include("../../include/sibyl.hrl").
 -include("../grpc/autogen/server/gateway_pb.hrl").
+-include_lib("blockchain/include/blockchain_vars.hrl").
 -include_lib("blockchain/include/blockchain_utils.hrl").
 
 -type handler_state() :: #{
@@ -177,7 +178,15 @@ check_if_reactivated_gw(GWAddr, Chain) ->
                     %% this means it will become available for POC
                     true = sibyl_poc_mgr:cache_reactivated_gw(GWAddr);
                 {ok, C} ->
-                    {ok, MaxActivityAge} = blockchain:config(poc_v4_target_challenge_age, Ledger),
+                    {ok, MaxActivityAge} =
+                        case
+                            blockchain:config(
+                                ?harmonize_activity_on_hip17_interactivity_blocks, Ledger
+                            )
+                        of
+                            {ok, true} -> blockchain:config(?hip17_interactivity_blocks, Ledger);
+                            _ -> blockchain:config(?poc_v4_target_challenge_age, Ledger)
+                        end,
                     case (CurHeight - C) > MaxActivityAge of
                         true ->
                             lager:debug("reactivating gw ~p", [?TO_ANIMAL_NAME(GWAddr)]),
