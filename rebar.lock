@@ -30,7 +30,7 @@
   2},
  {<<"dep_http2_client">>,
   {git,"https://github.com/helium/http2_client.git",
-       {ref,"920a31c6e46706ff19a1247ddb779adfcefd5e53"}},
+       {ref,"45163af5399cede1c1210ea665a4532d1a67eca3"}},
   1},
  {<<"e2qc">>,
   {git,"https://github.com/helium/e2qc",
