@@ -17,7 +17,8 @@
 -export([
     config_test/1,
     config_update_test/1,
-    validators_test/1
+    validators_test/1,
+    version_test/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -522,7 +523,7 @@ version_test(Config) ->
     {ok, #{
         headers := Headers1,
         result := #{
-            msg := {version_resp, ResponseMsg1},
+            msg := {version, ResponseMsg1},
             height := _ResponseHeight1,
             block_time := _ResponseBlockTime1,
             block_age := _ResponseBlockAge1,

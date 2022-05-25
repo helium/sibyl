@@ -55,7 +55,7 @@ validators(Ctx, #gateway_validators_req_v1_pb{} = Message) ->
     gateway_pb:gateway_version_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
 version(Ctx, #gateway_version_req_v1_pb{} = _Message) ->
-    lager:debug("executing RPC vrsion with msg ~p", [_Message]),
+    lager:debug("executing RPC version with msg ~p", [_Message]),
     VersionFn = application:get_env(sibyl, version_fn, fun sibyl_utils:default_version/0),
     Response = sibyl_utils:encode_gateway_resp_v1(
         #gateway_version_resp_v1_pb{version = VersionFn()},
