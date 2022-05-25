@@ -19,7 +19,8 @@
 -export([
     address_to_public_uri/2,
     config/2,
-    validators/2
+    validators/2,
+    version/2
 ]).
 
 %% ------------------------------------------------------------------
@@ -48,6 +49,19 @@ config(Ctx, #gateway_config_req_v1_pb{} = Message) ->
 validators(Ctx, #gateway_validators_req_v1_pb{} = Message) ->
     Chain = sibyl_mgr:blockchain(),
     validators(Chain, Ctx, Message).
+
+-spec version(
+    ctx:ctx(),
+    gateway_pb:gateway_version_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+version(Ctx, #gateway_version_req_v1_pb{} = _Message) ->
+    lager:debug("executing RPC vrsion with msg ~p", [_Message]),
+    Version = miner:version(),
+    Response = sibyl_utils:encode_gateway_resp_v1(
+        #gateway_version_resp_v1_pb{version = Version},
+        sibyl_mgr:sigfun()
+    ),
+    {ok, Response, Ctx}.
 
 %% ------------------------------------------------------------------
 %% callback breakout functions

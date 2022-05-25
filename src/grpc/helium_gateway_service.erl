@@ -28,7 +28,8 @@
 -export([
     address_to_public_uri/2,
     config/2,
-    validators/2
+    validators/2,
+    version/2
 ]).
 
 %% routing unary APIs
@@ -111,6 +112,12 @@ config(Ctx, Message) -> helium_unary_general_impl:config(Ctx, Message).
     gateway_pb:gateway_validators_req_v1_pb()
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
 validators(Ctx, Message) -> helium_unary_general_impl:validators(Ctx, Message).
+
+-spec version(
+    ctx:ctx(),
+    gateway_pb:gateway_version_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+version(Ctx, Message) -> helium_unary_general_impl:version(Ctx, Message).
 
 %%%-------------------------------------------------------------------
 %% Routing Unary RPC callbacks
