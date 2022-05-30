@@ -169,29 +169,32 @@ check_if_reactivated_gw(GWAddr, Chain) ->
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
     case blockchain:config(poc_activity_filter_enabled, Ledger) of
         {ok, true} ->
-            case blockchain_ledger_v1:find_gateway_last_challenge(GWAddr, Ledger) of
-                {error, _Reason} ->
-                    %% if GW not found or some other issue, ignore
+            %% TODO: quicker to perform two denorm reads that one find_gateway_info?
+            GWLocation = get_gateway_location(GWAddr, Ledger),
+            GWLastChallenge = get_gateway_last_challenge(GWAddr, Ledger),
+            case {GWLocation, GWLastChallenge} of
+                {undefined, _} ->
+                    %% if GW not asserted then do nothing further
                     ok;
-                {ok, undefined} ->
-                    %% No activity set, so include in list to reactivate
-                    %% this means it will become available for POC
+                {error, _} ->
+                    %% failed to get gw location
+                    %% maybe gw is not on chain - do nothing
+                    ok;
+                {_, error} ->
+                    %% failed to get gw last challenger
+                    %% maybe gw is not on chain - do nothing
+                    ok;
+                {_Loc, undefined} ->
+                    %% No activity set, add to reactivation list
+                    lager:debug("reactivating gw ~p", [?TO_ANIMAL_NAME(GWAddr)]),
                     true = sibyl_poc_mgr:cache_reactivated_gw(GWAddr);
-                {ok, C} ->
-                    {ok, MaxActivityAge} =
-                        case
-                            blockchain:config(
-                                ?harmonize_activity_on_hip17_interactivity_blocks, Ledger
-                            )
-                        of
-                            {ok, true} -> blockchain:config(?hip17_interactivity_blocks, Ledger);
-                            _ -> blockchain:config(?poc_v4_target_challenge_age, Ledger)
-                        end,
-                    case (CurHeight - C) > MaxActivityAge of
-                        true ->
+                {_Loc, LastActivity} when is_integer(LastActivity) ->
+                    MaxActivityAge = blockchain_utils:max_activity_age(Ledger),
+                    case blockchain_utils:is_gw_active(CurHeight, LastActivity, MaxActivityAge) of
+                        false ->
                             lager:debug("reactivating gw ~p", [?TO_ANIMAL_NAME(GWAddr)]),
                             true = sibyl_poc_mgr:cache_reactivated_gw(GWAddr);
-                        false ->
+                        true ->
                             ok
                     end
             end;
@@ -209,3 +212,21 @@ subscribe_to_events(Addr) ->
     POCTopic = sibyl_utils:make_poc_topic(Addr),
     [sibyl_bus:sub(E, self()) || E <- [?EVENT_ACTIVITY_CHECK_NOTIFICATION, POCTopic]],
     ok.
+
+-spec get_gateway_last_challenge(libp2p_crypto:pubkey_bin(), blockchain_ledger_v1:ledger()) ->
+    error | undefined | pos_integer().
+get_gateway_last_challenge(GWAddr, Ledger) ->
+    case blockchain_ledger_v1:find_gateway_last_challenge(GWAddr, Ledger) of
+        {error, _Reason} -> error;
+        {ok, undefined} -> undefined;
+        {ok, V} -> V
+    end.
+
+-spec get_gateway_location(libp2p_crypto:pubkey_bin(), blockchain_ledger_v1:ledger()) ->
+    error | undefined | integer().
+get_gateway_location(GWAddr, Ledger) ->
+    case blockchain_ledger_v1:find_gateway_location(GWAddr, Ledger) of
+        {error, _Reason} -> error;
+        {ok, undefined} -> undefined;
+        {ok, V} -> V
+    end.
