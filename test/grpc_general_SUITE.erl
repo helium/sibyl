@@ -39,7 +39,8 @@ all() ->
     [
         config_test,
         config_update_test,
-        validators_test
+        validators_test,
+        version_test
     ].
 
 %%--------------------------------------------------------------------
@@ -512,6 +513,37 @@ validators_test(Config) ->
     #{result := Validators3} = ResponseMsg3,
     ?assertEqual(1, length(Validators3)),
     ok.
+
+version_test(Config) ->
+    %% exercise the unary API version
+    Connection = ?config(grpc_connection, Config),
+
+    %% use the grpc APIs to get some chain var config vales
+    {ok, #{
+        headers := Headers1,
+        result := #{
+            msg := {version_resp, ResponseMsg1},
+            height := _ResponseHeight1,
+            block_time := _ResponseBlockTime1,
+            block_age := _ResponseBlockAge1,
+            signature := _ResponseSig1
+        } = Result1
+    }} = grpc_client:unary(
+        Connection,
+        #{},
+        'helium.gateway',
+        'version',
+        gateway_client_pb,
+        []
+    ),
+    ct:pal("Response Headers: ~p", [Headers1]),
+    ct:pal("Response Body: ~p", [Result1]),
+    #{<<":status">> := HttpStatus1} = Headers1,
+    ?assertEqual(HttpStatus1, <<"200">>),
+    #{version := Version} = ResponseMsg1,
+    ?assertEqual(sibyl_utils:default_version(), Version),
+    ok.
+
 %
 %% ------------------------------------------------------------------
 %% Helper functions

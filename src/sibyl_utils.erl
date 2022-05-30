@@ -30,7 +30,8 @@
     to_routing_pb/1,
     address_data/1,
     ensure/2,
-    ensure/3
+    ensure/3,
+    default_version/0
 ]).
 
 -spec make_event(binary()) -> sibyl_mgr:event().
@@ -78,6 +79,8 @@ encode_gateway_resp_v1(#gateway_config_resp_v1_pb{} = Msg, SigFun) ->
     do_encode_gateway_resp_v1({config_resp, Msg}, SigFun);
 encode_gateway_resp_v1(#gateway_validators_resp_v1_pb{} = Msg, SigFun) ->
     do_encode_gateway_resp_v1({validators_resp, Msg}, SigFun);
+encode_gateway_resp_v1(#gateway_version_resp_v1_pb{} = Msg, SigFun) ->
+    do_encode_gateway_resp_v1({version_resp, Msg}, SigFun);
 encode_gateway_resp_v1(#gateway_config_update_streamed_resp_v1_pb{} = Msg, SigFun) ->
     do_encode_gateway_resp_v1({config_update_streamed_resp, Msg}, SigFun);
 encode_gateway_resp_v1(#gateway_region_params_streamed_resp_v1_pb{} = Msg, SigFun) ->
@@ -304,3 +307,9 @@ list_to_num(V) ->
                 _ -> "bad_value"
             end
     end.
+
+-spec default_version() -> integer().
+default_version() ->
+    %% format:
+    %% MMMmmmPPPP
+    0010000000.
