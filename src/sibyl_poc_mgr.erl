@@ -150,7 +150,7 @@ handle_poc_event(
     ],
     {noreply, State#state{}}.
 
-run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, Vars) ->
+run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, _Vars) ->
     Entropy = <<Key/binary, BlockHash/binary>>,
     ZoneRandState = blockchain_utils:rand_state(Entropy),
     TargetMod = blockchain_utils:target_v_to_mod(blockchain:config(?poc_targeting_version, Ledger)),
@@ -158,14 +158,10 @@ run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, Vars) ->
         {error, _} ->
             lager:debug("*** failed to find a target zone", []),
             noop;
-        {ok, {HexList, Hex, HexRandState}} ->
+        {ok, {_HexList, Hex, _HexRandState}} ->
             %% get all GWs in this zone
-            {ok, ZoneGWs} = TargetMod:gateways_for_zone(
-                ChallengerAddr,
-                Ledger,
-                Vars,
-                HexList,
-                [{Hex, HexRandState}]
+            ZoneGWs = lists:flatten(
+                maps:values(blockchain_ledger_v1:lookup_gateways_from_hex(Hex, Ledger))
             ),
             lager:debug("*** found gateways for target zone: ~p", [ZoneGWs]),
             %% create the notification
