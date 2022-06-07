@@ -8,7 +8,8 @@
 -type handler_state() :: #{
     mod => atom(),
     streaming_initialized => boolean(),
-    addr => libp2p_crypto:pubkey_bin()
+    addr => libp2p_crypto:pubkey_bin(),
+    location => undefined | pos_integer()
 }.
 -export_type([handler_state/0]).
 
@@ -29,7 +30,7 @@ init(_RPC, StreamState) ->
     lager:debug("handler init, stream state ~p", [StreamState]),
     NewStreamState = grpcbox_stream:stream_handler_state(
         StreamState,
-        #{streaming_initialized => false, mod => ?MODULE}
+        #{streaming_initialized => false, mod => ?MODULE, location => undefined}
     ),
     NewStreamState.
 
@@ -72,6 +73,40 @@ handle_info(
     NewStreamState = grpcbox_stream:send(false, Msg, StreamState),
     NewStreamState;
 handle_info(
+    {asserted_gw_notify, Addr},
+    StreamState
+) ->
+    lager:debug("got asserted_gw_notify for addr ~p, resubscribing to new hex", [Addr]),
+    Chain = sibyl_mgr:blockchain(),
+    Ledger = blockchain:ledger(Chain),
+    #{location := OldLoc} =
+        HandlerState =
+        grpcbox_stream:stream_handler_state(StreamState),
+    NewHandlerState =
+        case blockchain_ledger_v1:find_gateway_location(Addr, Ledger) of
+            {ok, NewLoc} when OldLoc == undefined ->
+                %% first time assert for GW
+                %% need to sub all our things
+                ok = subscribe_to_events(NewLoc, Addr, Ledger),
+                %% save new location to state
+                HandlerState#{location => NewLoc};
+            {ok, NewLoc} when NewLoc /= OldLoc ->
+                %% gw has reasserted to new location
+                %% unsub from old location, sub to new
+                _ = sibyl_bus:leave(location_topic(OldLoc, Ledger), self()),
+                _ = sibyl_bus:sub(location_topic(NewLoc, Ledger), self()),
+                %% save new location to state
+                HandlerState#{location => NewLoc};
+            _ ->
+                %% hmm
+                HandlerState
+        end,
+    NewStreamState =
+        grpcbox_stream:stream_handler_state(
+            StreamState, NewHandlerState
+        ),
+    NewStreamState;
+handle_info(
     _Msg,
     StreamState
 ) ->
@@ -81,7 +116,6 @@ handle_info(
 %% ------------------------------------------------------------------
 %% callback breakout functions
 %% ------------------------------------------------------------------
-
 -spec pocs(
     blockchain:blockchain(),
     boolean(),
@@ -121,18 +155,29 @@ pocs(
         false ->
             {grpc_error, {grpcbox_stream:code_to_status(14), <<"bad signature">>}};
         true ->
-            lager:info("gw ~p is subscribing to poc events", [?TO_ANIMAL_NAME(Addr)]),
             Ledger = blockchain:ledger(Chain),
-            ok = subscribe_to_events(Addr, Ledger),
             HandlerState = grpcbox_stream:stream_handler_state(StreamState),
+            NewHandlerState =
+                case blockchain_ledger_v1:find_gateway_location(Addr, Ledger) of
+                    {ok, Loc} when Loc /= undefined ->
+                        lager:info("gw ~p is subscribing to poc events", [?TO_ANIMAL_NAME(Addr)]),
+                        %% GW is asserted, we are good to proceed
+                        ok = subscribe_to_events(Loc, Addr, Ledger),
+                        ok = check_if_reactivated_gw(Addr, Ledger),
+                        HandlerState#{location => Loc};
+                    _ ->
+                        lager:info("unasserted gw ~p is subscribing to poc events", [
+                            ?TO_ANIMAL_NAME(Addr)
+                        ]),
+                        HandlerState
+                end,
             NewStreamState = grpcbox_stream:stream_handler_state(
                 StreamState,
-                HandlerState#{
+                NewHandlerState#{
                     streaming_initialized => true,
                     addr => Addr
                 }
             ),
-            _ = check_if_reactivated_gw(Addr, Ledger),
             {ok, NewStreamState}
     end.
 
@@ -179,7 +224,8 @@ check_if_reactivated_gw(GWAddr, Ledger) ->
                 {ok, undefined} ->
                     %% No activity set, so include in list to reactivate
                     %% this means it will become available for POC
-                    true = sibyl_poc_mgr:cache_reactivated_gw(GWAddr);
+                    true = sibyl_poc_mgr:cache_reactivated_gw(GWAddr),
+                    ok;
                 {ok, C} ->
                     {ok, MaxActivityAge} =
                         case
@@ -193,7 +239,8 @@ check_if_reactivated_gw(GWAddr, Ledger) ->
                     case (CurHeight - C) > MaxActivityAge of
                         true ->
                             lager:debug("reactivating gw ~p", [?TO_ANIMAL_NAME(GWAddr)]),
-                            true = sibyl_poc_mgr:cache_reactivated_gw(GWAddr);
+                            true = sibyl_poc_mgr:cache_reactivated_gw(GWAddr),
+                            ok;
                         false ->
                             ok
                     end
@@ -204,26 +251,26 @@ check_if_reactivated_gw(GWAddr, Ledger) ->
     end.
 
 -spec subscribe_to_events(
-    libp2p_crypto:pubkey_bin(),
-    blockchain_ledger_v1:ledger()
+    Loc :: pos_integer(),
+    Addr :: libp2p_crypto:pubkey_bin(),
+    Ledger :: blockchain_ledger_v1:ledger()
 ) -> ok.
-subscribe_to_events(Addr, Ledger) ->
+subscribe_to_events(Loc, Addr, Ledger) ->
     %% topic key for POC streams is the hex of their asserted location
-    %% streamed POC notification published by the sibyl_poc_mgr
-    case blockchain_ledger_v1:find_gateway_location(Addr, Ledger) of
-        {ok, Loc} ->
-            {ok, Res} = blockchain:config(?poc_target_hex_parent_res, Ledger),
-            Hex = h3:parent(Loc, Res),
-            POCTopic = sibyl_utils:make_poc_topic(Hex),
-            sibyl_bus:sub(POCTopic, self());
-        _ ->
-            %% if no location asserted what to do ?
-            %% TODO: check with marc, as rust GWs need
-            %%       to be able to connect over grpc in an
-            %%       unasserted state, assert themselves
-            %%       and then receive POCs
-            ok
-    end,
-    %% also subscribe activity check events
-    sibyl_bus:sub(?EVENT_ACTIVITY_CHECK_NOTIFICATION, self()),
+    %% streamed POC notification is published by sibyl_poc_mgr
+    _ = sibyl_bus:sub(location_topic(Loc, Ledger), self()),
+    %% subscribe activity check events
+    _ = sibyl_bus:sub(?EVENT_ACTIVITY_CHECK_NOTIFICATION, self()),
+    %% subscribe to reassert notifications
+    ReassertTopic = sibyl_utils:make_asserted_gw_topic(Addr),
+    _ = sibyl_bus:sub(ReassertTopic, self()),
     ok.
+
+-spec location_topic(
+    Loc :: pos_integer(),
+    Ledger :: blockchain_ledger_v1:ledger()
+) -> binary().
+location_topic(Loc, Ledger) ->
+    {ok, Res} = blockchain:config(?poc_target_hex_parent_res, Ledger),
+    Hex = h3:parent(Loc, Res),
+    sibyl_utils:make_poc_topic(Hex).
