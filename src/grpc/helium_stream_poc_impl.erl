@@ -122,7 +122,8 @@ pocs(
             {grpc_error, {grpcbox_stream:code_to_status(14), <<"bad signature">>}};
         true ->
             lager:info("gw ~p is subscribing to poc events", [?TO_ANIMAL_NAME(Addr)]),
-            ok = subscribe_to_events(Addr),
+            Ledger = blockchain:ledger(Chain),
+            ok = subscribe_to_events(Addr, Ledger),
             HandlerState = grpcbox_stream:stream_handler_state(StreamState),
             NewStreamState = grpcbox_stream:stream_handler_state(
                 StreamState,
@@ -131,7 +132,7 @@ pocs(
                     addr => Addr
                 }
             ),
-            _ = check_if_reactivated_gw(Addr, Chain),
+            _ = check_if_reactivated_gw(Addr, Ledger),
             {ok, NewStreamState}
     end.
 
@@ -163,9 +164,11 @@ handle_event(
     lager:warning("received unhandled event ~p", [_Event]),
     StreamState.
 
--spec check_if_reactivated_gw(libp2p_crypto:pubkey_bin(), blockchain:blockchain()) -> ok.
-check_if_reactivated_gw(GWAddr, Chain) ->
-    Ledger = blockchain:ledger(Chain),
+-spec check_if_reactivated_gw(
+    libp2p_crypto:pubkey_bin(),
+    blockchain_ledger_v1:ledger()
+) -> ok.
+check_if_reactivated_gw(GWAddr, Ledger) ->
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
     case blockchain:config(poc_activity_filter_enabled, Ledger) of
         {ok, true} ->
@@ -200,12 +203,27 @@ check_if_reactivated_gw(GWAddr, Chain) ->
             ok
     end.
 
--spec subscribe_to_events(libp2p_crypto:pubkey_bin()) -> ok.
-subscribe_to_events(Addr) ->
-    %% topic key for POC streams is the pub key bin
-    %% streamed msgs will be received & published by the sibyl_poc_mgr
-    %% streamed POC msgs will be potential challenge notifications
-    %% we also want to activity check events
-    POCTopic = sibyl_utils:make_poc_topic(Addr),
-    [sibyl_bus:sub(E, self()) || E <- [?EVENT_ACTIVITY_CHECK_NOTIFICATION, POCTopic]],
+-spec subscribe_to_events(
+    libp2p_crypto:pubkey_bin(),
+    blockchain_ledger_v1:ledger()
+) -> ok.
+subscribe_to_events(Addr, Ledger) ->
+    %% topic key for POC streams is the hex of their asserted location
+    %% streamed POC notification published by the sibyl_poc_mgr
+    case blockchain_ledger_v1:find_gateway_location(Addr, Ledger) of
+        {ok, Loc} ->
+            {ok, Res} = blockchain:config(?poc_target_hex_parent_res, Ledger),
+            Hex = h3:parent(Loc, Res),
+            POCTopic = sibyl_utils:make_poc_topic(Hex),
+            sibyl_bus:sub(POCTopic, self());
+        _ ->
+            %% if no location asserted what to do ?
+            %% TODO: check with marc, as rust GWs need
+            %%       to be able to connect over grpc in an
+            %%       unasserted state, assert themselves
+            %%       and then receive POCs
+            ok
+    end,
+    %% also subscribe activity check events
+    sibyl_bus:sub(?EVENT_ACTIVITY_CHECK_NOTIFICATION, self()),
     ok.

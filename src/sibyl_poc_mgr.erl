@@ -159,12 +159,7 @@ run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, _Vars) ->
             lager:debug("*** failed to find a target zone", []),
             noop;
         {ok, {_HexList, Hex, _HexRandState}} ->
-            %% get all GWs in this zone
-            ZoneGWs = lists:flatten(
-                maps:values(blockchain_ledger_v1:lookup_gateways_from_hex(Hex, Ledger))
-            ),
-            lager:debug("*** found gateways for target zone: ~p", [ZoneGWs]),
-            %% create the notification
+            %% create notification informing GWs they may be being challenged
             case sibyl_utils:address_data([ChallengerAddr]) of
                 [] ->
                     lager:debug("*** no public addr for ~p", [ChallengerAddr]),
@@ -182,14 +177,10 @@ run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, _Vars) ->
                         NotificationPB,
                         sibyl_mgr:sigfun()
                     ),
-                    %% send the notification to all the GWs in the zone, informing them they might be being challenged
-                    lists:foreach(
-                        fun(GW) ->
-                            Topic = sibyl_utils:make_poc_topic(GW),
-                            lager:debug("*** sending poc notification to gateway ~p", [GW]),
-                            sibyl_bus:pub(Topic, {poc_notify, Notification})
-                        end,
-                        ZoneGWs
-                    )
+                    %% send the notification to all the GWs in the zone,
+                    %% GWs subscribe by the hex they are located in
+                    Topic = sibyl_utils:make_poc_topic(Hex),
+                    lager:debug("*** sending poc notification to all gateways in hex ~p", [Hex]),
+                    sibyl_bus:pub(Topic, {poc_notify, Notification})
             end
     end.
