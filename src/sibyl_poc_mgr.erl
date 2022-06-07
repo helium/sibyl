@@ -150,7 +150,7 @@ handle_poc_event(
     ],
     {noreply, State#state{}}.
 
-run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, Vars) ->
+run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, _Vars) ->
     Entropy = <<Key/binary, BlockHash/binary>>,
     ZoneRandState = blockchain_utils:rand_state(Entropy),
     TargetMod = blockchain_utils:target_v_to_mod(blockchain:config(?poc_targeting_version, Ledger)),
@@ -158,17 +158,8 @@ run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, Vars) ->
         {error, _} ->
             lager:debug("*** failed to find a target zone", []),
             noop;
-        {ok, {HexList, Hex, HexRandState}} ->
-            %% get all GWs in this zone
-            {ok, ZoneGWs} = TargetMod:gateways_for_zone(
-                ChallengerAddr,
-                Ledger,
-                Vars,
-                HexList,
-                [{Hex, HexRandState}]
-            ),
-            lager:debug("*** found gateways for target zone: ~p", [ZoneGWs]),
-            %% create the notification
+        {ok, {_HexList, Hex, _HexRandState}} ->
+            %% create notification informing GWs they may be being challenged
             case sibyl_utils:address_data([ChallengerAddr]) of
                 [] ->
                     lager:debug("*** no public addr for ~p", [ChallengerAddr]),
@@ -186,14 +177,10 @@ run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, Vars) ->
                         NotificationPB,
                         sibyl_mgr:sigfun()
                     ),
-                    %% send the notification to all the GWs in the zone, informing them they might be being challenged
-                    lists:foreach(
-                        fun(GW) ->
-                            Topic = sibyl_utils:make_poc_topic(GW),
-                            lager:debug("*** sending poc notification to gateway ~p", [GW]),
-                            sibyl_bus:pub(Topic, {poc_notify, Notification})
-                        end,
-                        ZoneGWs
-                    )
+                    %% send the notification to all the GWs in the zone,
+                    %% GWs subscribe by the hex they are located in
+                    Topic = sibyl_utils:make_poc_topic(Hex),
+                    lager:debug("*** sending poc notification to all gateways in hex ~p", [Hex]),
+                    sibyl_bus:pub(Topic, {poc_notify, Notification})
             end
     end.

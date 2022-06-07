@@ -45,8 +45,9 @@ make_event(EventType, EventPayload) ->
 make_sc_topic(SCID) ->
     <<?EVENT_STATE_CHANNEL_UPDATE/binary, SCID/binary>>.
 
-make_poc_topic(GatewayAddr) ->
-    <<?EVENT_POC_NOTIFICATION/binary, GatewayAddr/binary>>.
+make_poc_topic(Hex) ->
+    HexB = ensure(binary, Hex),
+    <<?EVENT_POC_NOTIFICATION/binary, HexB/binary>>.
 
 make_config_update_topic() ->
     <<?EVENT_CONFIG_UPDATE_NOTIFICATION/binary>>.
