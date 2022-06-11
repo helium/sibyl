@@ -50,7 +50,6 @@
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
 init(_RPC, StreamState) ->
     lager:debug("handler init, stream state ~p", [StreamState]),
-    ok = blockchain_event:add_handler(self()),
     NewStreamState = grpcbox_stream:stream_handler_state(
         StreamState,
         #{
@@ -78,24 +77,13 @@ follow_sc(_Msg, StreamState) ->
     {ok, StreamState}.
 
 -spec handle_info(any(), grpcbox_stream:t()) -> grpcbox_stream:t().
-handle_info({blockchain_event, {add_block, BlockHash, _Sync, _Ledger} = _Event}, StreamState) ->
+handle_info({blockchain_event, {add_block, _BlockHash, _Sync, Ledger} = _Event}, StreamState) ->
     %% for each add block event, we get the block height and use this to determine
     %% if we need to send any event msgs back to the client relating to close state
-    Chain = sibyl_mgr:blockchain(),
-    Ledger = blockchain:ledger(Chain),
+    {ok, Height} = blockchain_ledger_v1:current_height(Ledger),
     SCGrace = get_sc_grace(Ledger),
-    NewStreamState =
-        case blockchain:get_block(BlockHash, Chain) of
-            {ok, Block} ->
-                BlockHeight = blockchain_block:height(Block),
-                lager:debug("processing add_block event for height ~p", [
-                    BlockHeight
-                ]),
-                process_sc_block_events(BlockHeight, SCGrace, StreamState);
-            _ ->
-                %% hmm do nothing...
-                StreamState
-        end,
+    lager:debug("processing add_block event for height ~p", [Height]),
+    NewStreamState = process_sc_block_events(Height, SCGrace, StreamState),
     NewStreamState;
 handle_info(
     {event, _EventTopic, _Payload} = Event,
@@ -251,7 +239,7 @@ handle_event(
             StreamState
     end;
 handle_event(
-    {event, _EventTopic, {put, LedgerSCID, Payload}} = _Event,
+    {event, _EventTopic, {put, LedgerSCID, SC}} = _Event,
     StreamState
 ) ->
     lager:debug("handling updated state channel for ledger key ~p", [LedgerSCID]),
@@ -262,63 +250,58 @@ handle_event(
     %% we will also get put events for V1 SCs, but we can ignore those
     %% we only want to handle a V2 SC which has been updated to closed or dispute state
     FinalStreamState =
-        case deserialize_sc(Payload) of
-            {v1, _SC} ->
-                StreamState;
-            {v2, SC} ->
-                case blockchain_ledger_state_channel_v2:close_state(SC) of
-                    closed ->
-                        #{sc_closes_sent := SCClosesSent, sc_follows := SCFollows} =
-                            HandlerState = grpcbox_stream:stream_handler_state(
-                                StreamState
-                            ),
-                        %% use the ledger key to get the standalone SC ID from our follow list
-                        case maps:get(LedgerSCID, SCFollows, not_found) of
-                            {SCMod, SCID, SCOwner, SCExpireAtHeight, SCLastState, SCLastBlockTime} ->
-                                {ok, CurHeight} = get_height(),
-                                lager:debug(
-                                    "got PUT for V2 SC ~p with close state ~p at height ~p",
-                                    [
-                                        SCID,
-                                        ?SC_CLOSED,
-                                        CurHeight
-                                    ]
-                                ),
-
-                                {WasSent, NewStreamState, NewClosesSent} = maybe_send_follow_msg(
-                                    lists:member(SCID, SCClosesSent),
-                                    SCID,
-                                    SCOwner,
-                                    {?SC_CLOSED, SCClosesSent},
-                                    CurHeight,
-                                    SCLastState,
-                                    SCLastBlockTime,
-                                    StreamState
-                                ),
-                                UpdatedSCState =
-                                    case WasSent of
-                                        true -> ?SC_CLOSED;
-                                        false -> SCLastState
-                                    end,
-                                grpcbox_stream:stream_handler_state(
-                                    NewStreamState,
-                                    HandlerState#{
-                                        sc_follows => maps:put(
-                                            LedgerSCID,
-                                            {SCMod, SCID, SCOwner, SCExpireAtHeight, UpdatedSCState,
-                                                CurHeight},
-                                            SCFollows
-                                        ),
-                                        sc_closes_sent => NewClosesSent
-                                    }
-                                );
-                            not_found ->
-                                %% if we dont have a matching entry in the follow list do nothing
-                                StreamState
-                        end;
-                    _ ->
+        case blockchain_ledger_state_channel_v2:close_state(SC) of
+            closed ->
+                #{sc_closes_sent := SCClosesSent, sc_follows := SCFollows} =
+                    HandlerState = grpcbox_stream:stream_handler_state(
                         StreamState
-                end
+                    ),
+                %% use the ledger key to get the standalone SC ID from our follow list
+                case maps:get(LedgerSCID, SCFollows, not_found) of
+                    {SCMod, SCID, SCOwner, SCExpireAtHeight, SCLastState, SCLastBlockTime} ->
+                        {ok, CurHeight} = get_height(),
+                        lager:debug(
+                            "got PUT for V2 SC ~p with close state ~p at height ~p",
+                            [
+                                SCID,
+                                ?SC_CLOSED,
+                                CurHeight
+                            ]
+                        ),
+
+                        {WasSent, NewStreamState, NewClosesSent} = maybe_send_follow_msg(
+                            lists:member(SCID, SCClosesSent),
+                            SCID,
+                            SCOwner,
+                            {?SC_CLOSED, SCClosesSent},
+                            CurHeight,
+                            SCLastState,
+                            SCLastBlockTime,
+                            StreamState
+                        ),
+                        UpdatedSCState =
+                            case WasSent of
+                                true -> ?SC_CLOSED;
+                                false -> SCLastState
+                            end,
+                        grpcbox_stream:stream_handler_state(
+                            NewStreamState,
+                            HandlerState#{
+                                sc_follows => maps:put(
+                                    LedgerSCID,
+                                    {SCMod, SCID, SCOwner, SCExpireAtHeight, UpdatedSCState,
+                                        CurHeight},
+                                    SCFollows
+                                ),
+                                sc_closes_sent => NewClosesSent
+                            }
+                        );
+                    not_found ->
+                        %% if we dont have a matching entry in the follow list do nothing
+                        StreamState
+                end;
+            _ ->
+                StreamState
         end,
     FinalStreamState;
 handle_event(
@@ -333,6 +316,7 @@ handle_event(
 %% TODO - verify the exact scenarios/triggers for the closing and closable state
 %%        what is below is a best guess for now
 process_sc_block_events(BlockTime, SCGrace, StreamState) ->
+    lager:debug("checking SC for height: ~p",[BlockTime]),
     %% for each SC we are following, check if we are now in a closable or closing state
     %% ( we will derive close and dispute states from the ledger update events )
     #{sc_follows := SCFollows} = grpcbox_stream:stream_handler_state(
@@ -457,9 +441,13 @@ process_sc_block_events(
     _SCGrace,
     StreamState
 ) ->
-    lager:debug("process_sc_block_events: nothing to do for SC ~p at blocktime ~p", [
+    lager:debug("process_sc_block_events: nothing to do for SC ~p
+                    at blocktime ~p, scExpire ~p, scLastState ~p, scLastBlockTime", [
         _SCID,
-        _BlockTime
+        _BlockTime,
+        _SCExpireAtHeight,
+        _SCLastState,
+        _SCLastBlockTime
     ]),
     StreamState.
 
@@ -560,11 +548,3 @@ get_sc_grace(Ledger) ->
         {ok, G} -> G;
         _ -> 0
     end.
-
--spec deserialize_sc(binary()) ->
-    {v1, blockchain_state_channel_v1:state_channel()}
-    | {v2, blockchain_state_channel_v1:state_channel()}.
-deserialize_sc(SC = <<1, _/binary>>) ->
-    {v1, blockchain_ledger_state_channel_v1:deserialize(SC)};
-deserialize_sc(SC = <<2, _/binary>>) ->
-    {v2, blockchain_ledger_state_channel_v2:deserialize(SC)}.

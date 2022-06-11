@@ -413,12 +413,19 @@ add_commit_hooks() ->
             fun
                 ({_CF, put, Key, Value}) ->
                     %% note: the key will be a combo of <<owner, sc_id>>
-                    SCTopic = sibyl_utils:make_sc_topic(Key),
-                    lager:debug("publishing SC put event for key ~p and topic ~p", [Key, SCTopic]),
-                    sibyl_bus:pub(
-                        SCTopic,
-                        sibyl_utils:make_event(SCTopic, {put, Key, Value})
-                    );
+                    case deserialize_sc(Value) of
+                        {v1, _SC} ->
+                            ok;
+                        {v2, SC} ->
+                            SCTopic = sibyl_utils:make_sc_topic(Key),
+                            lager:debug("publishing SC put event for key ~p and topic ~p", [
+                                Key, SCTopic
+                            ]),
+                            sibyl_bus:pub(
+                                SCTopic,
+                                sibyl_utils:make_event(SCTopic, {put, Key, SC})
+                            )
+                    end;
                 ({_CF, delete, Key}) ->
                     %% note: the key will be a combo of <<owner, sc_id>>
                     SCTopic = sibyl_utils:make_sc_topic(Key),
@@ -451,3 +458,11 @@ subscribe_to_events() ->
     %% subscribe to events the mgr is interested in
     [sibyl_bus:sub(E, self()) || E <- [?EVENT_ROUTING_UPDATES_END, ?EVENT_STATE_CHANNEL_UPDATE]],
     ok.
+
+-spec deserialize_sc(binary()) ->
+    {v1, blockchain_state_channel_v1:state_channel()}
+    | {v2, blockchain_state_channel_v1:state_channel()}.
+deserialize_sc(SC = <<1, _/binary>>) ->
+    {v1, blockchain_ledger_state_channel_v1:deserialize(SC)};
+deserialize_sc(SC = <<2, _/binary>>) ->
+    {v2, blockchain_ledger_state_channel_v2:deserialize(SC)}.
