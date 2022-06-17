@@ -30,6 +30,7 @@
 
 -type handler_state() :: #{
     mod => atom(),
+    streaming_initialized => boolean(),
     sc_follows => map(),
     sc_closes_sent => [any()],
     sc_closings_sent => [any()],
@@ -50,16 +51,11 @@
 -spec init(atom(), grpcbox_stream:t()) -> grpcbox_stream:t().
 init(_RPC, StreamState) ->
     lager:debug("handler init, stream state ~p", [StreamState]),
+    HandlerState = grpcbox_stream:stream_handler_state(StreamState),
+    NewHandlerState = maybe_initialize_state(HandlerState),
     NewStreamState = grpcbox_stream:stream_handler_state(
         StreamState,
-        #{
-            mod => ?MODULE,
-            sc_follows => #{},
-            sc_closes_sent => [],
-            sc_closings_sent => [],
-            sc_closables_sent => [],
-            sc_disputes_sent => []
-        }
+        NewHandlerState
     ),
     NewStreamState.
 
@@ -157,6 +153,7 @@ follow_sc(
     NewStreamState0 = grpcbox_stream:stream_handler_state(
         StreamState,
         HandlerState#{
+            streaming_initialized => true,
             sc_follows => maps:put(
                 LedgerSCID,
                 {SCLedgerMod, SCID, SCOwner, SCExpireAtHeight, undefined, CurHeight},
@@ -548,3 +545,16 @@ get_sc_grace(Ledger) ->
         {ok, G} -> G;
         _ -> 0
     end.
+
+-spec maybe_initialize_state(handler_state()) -> handler_state().
+maybe_initialize_state(#{streaming_initialized := true} = HandlerState) ->
+    HandlerState;
+maybe_initialize_state(_HandlerState) ->
+    #{
+        mod => ?MODULE,
+        sc_follows => #{},
+        sc_closes_sent => [],
+        sc_closings_sent => [],
+        sc_closables_sent => [],
+        sc_disputes_sent => []
+    }.
