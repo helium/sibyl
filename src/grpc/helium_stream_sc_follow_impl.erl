@@ -143,8 +143,6 @@ follow_sc(
     SCTopic = sibyl_utils:make_sc_topic(LedgerSCID),
     lager:debug("subscribing to SC events for key ~p and topic ~p", [LedgerSCID, SCTopic]),
     ok = sibyl_bus:sub(SCTopic, self()),
-    %% subscribe to block events so we can get blocktime
-    ok = blockchain_event:add_handler(self()),
     %% add this SC to our follow list
     #{sc_follows := SCFollows} =
         HandlerState = grpcbox_stream:stream_handler_state(
@@ -550,6 +548,8 @@ get_sc_grace(Ledger) ->
 maybe_initialize_state(#{streaming_initialized := true} = HandlerState) ->
     HandlerState;
 maybe_initialize_state(_HandlerState) ->
+    %% subscribe to block events so we can get blocktime
+    ok = blockchain_event:add_handler(self()),
     #{
         mod => ?MODULE,
         sc_follows => #{},
