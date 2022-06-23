@@ -199,8 +199,9 @@ handle_event(
     %% each GW to see if they have fallen inactive
     %% if so reactivate them
     Chain = sibyl_mgr:blockchain(),
+    Ledger = blockchain:ledger(Chain),
     #{addr := GWAddr} = grpcbox_stream:stream_handler_state(StreamState),
-    _ = check_if_reactivated_gw(GWAddr, Chain),
+    _ = check_if_reactivated_gw(GWAddr, Ledger),
     StreamState;
 handle_event(
     {event, _EventType, _Payload} = _Event,
