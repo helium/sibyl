@@ -405,7 +405,7 @@ init_per_testcase(TestCase, Config) ->
     %% connect the nodes
     pmap(
         fun(Node) ->
-            Swarm = ct_rpc:call(Node, blockchain_swarm, swarm, [], 2000),
+            Swarm = ct_rpc:call(Node, blockchain_swarm, tid, [], 2000),
             lists:foreach(
                 fun(A) ->
                     ct_rpc:call(Node, libp2p_swarm, connect, [Swarm, A], 2000)
@@ -428,7 +428,7 @@ init_per_testcase(TestCase, Config) ->
                                 true;
                             false ->
                                 ct:pal("~p is not connected to enough peers ~p", [Node, GossipPeers]),
-                                Swarm = ct_rpc:call(Node, blockchain_swarm, swarm, [], 500),
+                                Swarm = ct_rpc:call(Node, blockchain_swarm, tid, [], 500),
                                 lists:foreach(
                                     fun(A) ->
                                         CRes = ct_rpc:call(
@@ -452,7 +452,7 @@ init_per_testcase(TestCase, Config) ->
                 Nodes
             )
         end,
-        200,
+        400,
         150
     ),
 
