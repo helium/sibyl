@@ -311,7 +311,7 @@ handle_event(
 %% TODO - verify the exact scenarios/triggers for the closing and closable state
 %%        what is below is a best guess for now
 process_sc_block_events(BlockTime, SCGrace, StreamState) ->
-    lager:debug("checking SC for height: ~p",[BlockTime]),
+    lager:debug("checking SC for height: ~p", [BlockTime]),
     %% for each SC we are following, check if we are now in a closable or closing state
     %% ( we will derive close and dispute states from the ledger update events )
     #{sc_follows := SCFollows} = grpcbox_stream:stream_handler_state(
@@ -436,14 +436,17 @@ process_sc_block_events(
     _SCGrace,
     StreamState
 ) ->
-    lager:debug("process_sc_block_events: nothing to do for SC ~p
-                    at blocktime ~p, scExpire ~p, scLastState ~p, scLastBlockTime", [
-        _SCID,
-        _BlockTime,
-        _SCExpireAtHeight,
-        _SCLastState,
-        _SCLastBlockTime
-    ]),
+    lager:debug(
+        "process_sc_block_events: nothing to do for SC ~p\n"
+        "                    at blocktime ~p, scExpire ~p, scLastState ~p, scLastBlockTime",
+        [
+            _SCID,
+            _BlockTime,
+            _SCExpireAtHeight,
+            _SCLastState,
+            _SCLastBlockTime
+        ]
+    ),
     StreamState.
 
 -spec maybe_send_follow_msg(

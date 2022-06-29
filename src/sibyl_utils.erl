@@ -277,8 +277,16 @@ grpc_port(PubKeyBin) ->
     Aliases = application:get_env(sibyl, node_grpc_port_aliases, []),
     case lists:keyfind(MAddr, 1, Aliases) of
         false ->
-            Port = application:get_env(sibyl, grpc_port, 8080),
-            {Port, false};
+            %% if we are getting port for the host val
+            %% then check the config for any defined port
+            %% otherwise default to port 8080
+            case blockchain_swarm:pubkey_bin() == PubKeyBin of
+                true ->
+                    Port = application:get_env(sibyl, grpc_port, 8080),
+                    {Port, false};
+                false ->
+                    {8080, false}
+            end;
         {MAddr, {Port, SSL}} ->
             {Port, SSL}
     end.
