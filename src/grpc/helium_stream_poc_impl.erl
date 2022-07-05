@@ -216,40 +216,48 @@ handle_event(
 ) -> ok.
 check_if_reactivated_gw(GWAddr, Ledger) ->
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
-    case blockchain:config(poc_activity_filter_enabled, Ledger) of
-        {ok, true} ->
-            case blockchain_ledger_v1:find_gateway_last_challenge(GWAddr, Ledger) of
-                {error, _Reason} ->
-                    %% if GW not found or some other issue, ignore
-                    ok;
-                {ok, undefined} ->
-                    %% No activity set, so include in list to reactivate
-                    %% this means it will become available for POC
-                    true = sibyl_poc_mgr:cache_reactivated_gw(GWAddr),
-                    ok;
-                {ok, C} ->
-                    {ok, MaxActivityAge} =
-                        case
-                            blockchain:config(
-                                ?harmonize_activity_on_hip17_interactivity_blocks, Ledger
-                            )
-                        of
-                            {ok, true} -> blockchain:config(?hip17_interactivity_blocks, Ledger);
-                            _ -> blockchain:config(?poc_v4_target_challenge_age, Ledger)
-                        end,
-                    case (CurHeight - C) > MaxActivityAge of
-                        true ->
-                            lager:debug("reactivating gw ~p", [?TO_ANIMAL_NAME(GWAddr)]),
+    DenyListFn = application:get_env(sibyl, denylist_fn, fun(_)-> false end),
+    case DenyListFn(GWAddr) of
+        true ->
+            lager:info("connection from denylist hotspot ~p", [?TO_ANIMAL_NAME(GWAddr)]),
+            ok;
+        false ->
+            case blockchain:config(poc_activity_filter_enabled, Ledger) of
+                {ok, true} ->
+                    case blockchain_ledger_v1:find_gateway_last_challenge(GWAddr, Ledger) of
+                        {error, _Reason} ->
+                            %% if GW not found or some other issue, ignore
+                            ok;
+                        {ok, undefined} ->
+                            %% No activity set, so include in list to reactivate
+                            %% this means it will become available for POC
                             true = sibyl_poc_mgr:cache_reactivated_gw(GWAddr),
                             ok;
-                        false ->
-                            ok
-                    end
-            end;
-        _ ->
-            %% activity filter not set, do nothing
-            ok
+                        {ok, C} ->
+                            {ok, MaxActivityAge} =
+                                case
+                                    blockchain:config(
+                                        ?harmonize_activity_on_hip17_interactivity_blocks, Ledger
+                                    )
+                                of
+                                    {ok, true} -> blockchain:config(?hip17_interactivity_blocks, Ledger);
+                                    _ -> blockchain:config(?poc_v4_target_challenge_age, Ledger)
+                                end,
+                            case (CurHeight - C) > MaxActivityAge of
+                                true ->
+                                    lager:debug("reactivating gw ~p", [?TO_ANIMAL_NAME(GWAddr)]),
+                                    true = sibyl_poc_mgr:cache_reactivated_gw(GWAddr),
+                                    ok;
+                                false ->
+                                    ok
+                            end
+                    end;
+                _ ->
+                    %% activity filter not set, do nothing
+                    ok
+            end
     end.
+
 
 -spec subscribe_to_events(
     Loc :: pos_integer(),
