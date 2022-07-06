@@ -17,6 +17,7 @@
 -include("sibyl.hrl").
 -include_lib("blockchain/include/blockchain_vars.hrl").
 -include_lib("blockchain/include/blockchain.hrl").
+-include_lib("blockchain/include/blockchain_utils.hrl").
 
 %% API
 -export([
@@ -156,13 +157,16 @@ run_poc_targetting(ChallengerAddr, Key, Ledger, BlockHash, _Vars) ->
     TargetMod = blockchain_utils:target_v_to_mod(blockchain:config(?poc_targeting_version, Ledger)),
     case TargetMod:target_zone(ZoneRandState, Ledger) of
         {error, _} ->
-            lager:debug("*** failed to find a target zone", []),
+            lager:warning("failed to find a target zone for onionkey hash: ~p", [Key]),
             noop;
         {ok, {_HexList, Hex, _HexRandState}} ->
             %% create notification informing GWs they may be being challenged
             case sibyl_utils:address_data([ChallengerAddr]) of
                 [] ->
-                    lager:debug("*** no public addr for ~p", [ChallengerAddr]),
+                    lager:warning(
+                        "poc_notify failed for onionkey hash: ~p, no public addr for challenger ~p",
+                        [Key, ?TO_ANIMAL_NAME(ChallengerAddr)]
+                    ),
                     %% hmmm we have no public address for the challenger's pub key
                     %% what to do ?
                     ok;
