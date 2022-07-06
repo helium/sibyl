@@ -195,6 +195,8 @@ poc_key_to_public_uri(
     RespPB =
         case blockchain_ledger_v1:find_public_poc(OnionKeyHash, Ledger) of
             {error, not_found} ->
+                lager:warning("poc_not_found for onion key hash: ~p",
+                    [OnionKeyHash]),
                 #gateway_error_resp_pb{
                     error = <<"poc_not_found">>,
                     details = OnionKeyHash
@@ -203,6 +205,8 @@ poc_key_to_public_uri(
                 Challenger = blockchain_ledger_poc_v3:challenger(PoC),
                 case sibyl_utils:address_data([Challenger]) of
                     [] ->
+                        lager:warning("no_public_route_for_challenger for challenger: ~p and onion key hash: ~p",
+                            [Challenger, OnionKeyHash]),
                         #gateway_error_resp_pb{
                             error = <<"no_public_route_for_challenger">>,
                             details = Challenger
