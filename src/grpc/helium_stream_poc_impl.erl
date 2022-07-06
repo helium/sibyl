@@ -216,7 +216,7 @@ handle_event(
 ) -> ok.
 check_if_reactivated_gw(GWAddr, Ledger) ->
     {ok, CurHeight} = blockchain_ledger_v1:current_height(Ledger),
-    DenyListFn = application:get_env(sibyl, denylist_fn, fun(_)-> false end),
+    DenyListFn = application:get_env(sibyl, denylist_fn, fun(_) -> false end),
     case DenyListFn(GWAddr) of
         true ->
             lager:info("connection from denylist hotspot ~p", [?TO_ANIMAL_NAME(GWAddr)]),
@@ -240,8 +240,10 @@ check_if_reactivated_gw(GWAddr, Ledger) ->
                                         ?harmonize_activity_on_hip17_interactivity_blocks, Ledger
                                     )
                                 of
-                                    {ok, true} -> blockchain:config(?hip17_interactivity_blocks, Ledger);
-                                    _ -> blockchain:config(?poc_v4_target_challenge_age, Ledger)
+                                    {ok, true} ->
+                                        blockchain:config(?hip17_interactivity_blocks, Ledger);
+                                    _ ->
+                                        blockchain:config(?poc_v4_target_challenge_age, Ledger)
                                 end,
                             case (CurHeight - C) > MaxActivityAge of
                                 true ->
@@ -257,7 +259,6 @@ check_if_reactivated_gw(GWAddr, Ledger) ->
                     ok
             end
     end.
-
 
 -spec subscribe_to_events(
     Loc :: pos_integer(),
