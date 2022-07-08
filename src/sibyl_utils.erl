@@ -252,6 +252,8 @@ check_for_public_uri(PubKeyBin) ->
                     {ok, Addr}
             end;
         {error, not_found} ->
+            %% refresh the peer
+            _ = libp2p_peerbook:refresh(Peerbook, PubKeyBin),
             {error, peer_not_found}
     end.
 
