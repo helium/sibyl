@@ -395,7 +395,7 @@ init_per_testcase(TestCase, Config) ->
     %% accumulate the listen addr of all the nodes
     Addrs = pmap(
         fun(Node) ->
-            Swarm = ct_rpc:call(Node, blockchain_swarm, swarm, [], 2000),
+            Swarm = ct_rpc:call(Node, blockchain_swarm, tid, [], 2000),
             [H | _] = ct_rpc:call(Node, libp2p_swarm, listen_addrs, [Swarm], 2000),
             H
         end,
@@ -514,7 +514,10 @@ initialize_nodes(TestCase, Config) ->
     POCV11Vars =
         case TestCase of
             X when
-                X == streaming_region_params_test
+                X == streaming_region_params_test;
+                X == region_params_asserted_gw_test;
+                X == region_params_unasserted_gw_test;
+                X == region_params_bad_sig_test
             ->
                 sibyl_regions_test_utils:poc_v11_vars();
             _ ->

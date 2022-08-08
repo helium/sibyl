@@ -29,7 +29,8 @@
     address_to_public_uri/2,
     config/2,
     validators/2,
-    version/2
+    version/2,
+    region_params/2
 ]).
 
 %% routing unary APIs
@@ -119,6 +120,11 @@ validators(Ctx, Message) -> helium_unary_general_impl:validators(Ctx, Message).
 ) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
 version(Ctx, Message) -> helium_unary_general_impl:version(Ctx, Message).
 
+-spec region_params(
+    ctx:ctx(),
+    gateway_pb:gateway_region_params_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+region_params(Ctx, Message) -> helium_unary_general_impl:region_params(Ctx, Message).
 %%%-------------------------------------------------------------------
 %% Routing Unary RPC callbacks
 %%%-------------------------------------------------------------------

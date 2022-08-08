@@ -8,6 +8,9 @@
     maps:from_list(lists:zip(record_info(fields, Rec), tl(tuple_to_list(Ref))))
 ).
 
+-define(TEST_LOCATION, 631210968840687103).
+-define(TEST_LOCATION2, 631210968910285823).
+
 -export([
     all/0,
     init_per_testcase/2,
@@ -18,7 +21,10 @@
     config_test/1,
     config_update_test/1,
     validators_test/1,
-    version_test/1
+    version_test/1,
+    region_params_asserted_gw_test/1,
+    region_params_unasserted_gw_test/1,
+    region_params_bad_sig_test/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -41,7 +47,9 @@ all() ->
         config_test,
         config_update_test,
         validators_test,
-        version_test
+        version_test,
+        region_params_test,
+        region_params_bad_sig_test
     ].
 
 %%--------------------------------------------------------------------
@@ -119,6 +127,8 @@ init_per_testcase(TestCase, Config) ->
     %% setup the grpc connection
     {ok, Connection} = grpc_client:connect(tcp, "localhost", 10001),
 
+    Chain = blockchain_worker:blockchain(),
+
     [
         {sup, Sup},
         {local_node_pubkey, LocalNodePubKey},
@@ -126,7 +136,8 @@ init_per_testcase(TestCase, Config) ->
         {local_node_privkey, LocalNodePrivKey},
         {local_node_sigfun, LocalNodeSigFun},
         {sibyl_sup, SibylSupPid},
-        {grpc_connection, Connection}
+        {grpc_connection, Connection},
+        {chain, Chain}
         | Config1
     ].
 
@@ -545,7 +556,179 @@ version_test(Config) ->
     ?assertEqual(sibyl_utils:default_version(), Version),
     ok.
 
+region_params_asserted_gw_test(Config) ->
+    %% exercise the unary API region params
+    Connection = ?config(grpc_connection, Config),
+    Chain = ?config(chain, Config),
+    ConsensusMembers = ?config(consensus_members, Config),
+
+    [_, {Payer, _PayerPubKey, PayerSigFun}, {Owner, _OwnerPubKey, OwnerSigFun} | _] =
+        ConsensusMembers,
+
+    %% add new gateway
+    #{public := GatewayPubKey, secret := GatewayPrivKey} = libp2p_crypto:generate_keys(ecc_compact),
+    Gateway = libp2p_crypto:pubkey_to_bin(GatewayPubKey),
+    GatewaySigFun = libp2p_crypto:mk_sig_fun(GatewayPrivKey),
+    AddGatewayTx = blockchain_txn_add_gateway_v1:new(Owner, Gateway, Payer),
+    SignedAddGatewayTx0 = blockchain_txn_add_gateway_v1:sign(AddGatewayTx, OwnerSigFun),
+    SignedAddGatewayTx1 = blockchain_txn_add_gateway_v1:sign_request(
+        SignedAddGatewayTx0, GatewaySigFun
+    ),
+    SignedAddGatewayTx2 = blockchain_txn_add_gateway_v1:sign_payer(
+        SignedAddGatewayTx1, PayerSigFun
+    ),
+    ?assertEqual(ok, blockchain_txn_add_gateway_v1:is_valid(SignedAddGatewayTx2, Chain)),
+
+    %% assert gateway
+    AssertLocationRequestTx = blockchain_txn_assert_location_v2:new(
+        Gateway, Owner, Payer, ?TEST_LOCATION, 1
+    ),
+    AssertLocationRequestTx1 = blockchain_txn_assert_location_v2:gain(AssertLocationRequestTx, 50),
+    SignedAssertLocationTx0 = blockchain_txn_assert_location_v2:sign(
+        AssertLocationRequestTx1, OwnerSigFun
+    ),
+    SignedAssertLocationTx1 = blockchain_txn_assert_location_v2:sign_payer(
+        SignedAssertLocationTx0, PayerSigFun
+    ),
+
+    {ok, Block1} = sibyl_ct_utils:create_block(ConsensusMembers, [
+        SignedAddGatewayTx2, SignedAssertLocationTx1
+    ]),
+    _ = blockchain_gossip_handler:add_block(Block1, Chain, self(), blockchain_swarm:tid()),
+    ok = sibyl_ct_utils:wait_until(fun() -> {ok, 2} == blockchain:height(Chain) end),
+
+    %% build the request from the added gw
+    %% specify EU868 as the region request
+    %% this should be ignored as the GW
+    %% is already asserted in US915 region
+    Region = 'EU868',
+    Req = build_region_params_req(Region, Gateway, GatewaySigFun),
+
+    %% send the request
+    {ok, #{
+        headers := Headers1,
+        result := #{
+            msg := {region_params_resp, ResponseMsg1},
+            height := _ResponseHeight1,
+            block_time := _ResponseBlockTime1,
+            block_age := _ResponseBlockAge1,
+            signature := _ResponseSig1
+        } = Result1
+    }} = grpc_client:unary(
+        Connection,
+        Req,
+        'helium.gateway',
+        'region_params',
+        gateway_client_pb,
+        []
+    ),
+    ct:pal("Response Headers: ~p", [Headers1]),
+    ct:pal("Response Body: ~p", [Result1]),
+    #{<<":status">> := HttpStatus1} = Headers1,
+    ?assertEqual(HttpStatus1, <<"200">>),
+    #{region := ReturnedRegion, params := _Params, gain := Gain} = ResponseMsg1,
+    ct:pal("Response Gain: ~p", [Gain]),
+    %% whilst the request specified EU868, the GW
+    %% previously asserted its location in US915 region
+    %% the server side will use the asserted location
+    %% and ignore the specified region
+    ?assertEqual(ReturnedRegion, 'US915'),
+    %% gain for the asserted gateway is 50
+    ?assertEqual(Gain, 50),
+    ok.
+
+region_params_unasserted_gw_test(Config) ->
+    %% exercise the unary API region params
+    Connection = ?config(grpc_connection, Config),
+
+    %% generate some keys to emulate an unasserted gw
+    #{public := LocalNodePubKey, secret := LocalNodePrivKey} = libp2p_crypto:generate_keys(
+        ecc_compact
+    ),
+    GWSigFun = libp2p_crypto:mk_sig_fun(LocalNodePrivKey),
+    GWAddr = libp2p_crypto:pubkey_to_bin(LocalNodePubKey),
+
+    %% build a request from an unasserted gw
+    %% defaults its region to US915
+    Region = 'US915',
+    Req1 = build_region_params_req(Region, GWAddr, GWSigFun),
+
+    %% send the request
+    {ok, #{
+        headers := Headers1,
+        result := #{
+            msg := {region_params_resp, ResponseMsg1},
+            height := _ResponseHeight1,
+            block_time := _ResponseBlockTime1,
+            block_age := _ResponseBlockAge1,
+            signature := _ResponseSig1
+        } = Result1
+    }} = grpc_client:unary(
+        Connection,
+        Req1,
+        'helium.gateway',
+        'region_params',
+        gateway_client_pb,
+        []
+    ),
+    ct:pal("Response Headers: ~p", [Headers1]),
+    ct:pal("Response Body: ~p", [Result1]),
+    #{<<":status">> := HttpStatus1} = Headers1,
+    ?assertEqual(HttpStatus1, <<"200">>),
+    #{region := ReturnedRegion, params := _Params, gain := Gain} = ResponseMsg1,
+    ct:pal("Response Gain: ~p", [Gain]),
+    %% returned region should be same as specified in the request
+    ?assertEqual(Region, ReturnedRegion),
+    %% gain for an unasserted gateway will be zero
+    ?assertEqual(0, Gain),
+    ok.
+
+region_params_bad_sig_test(Config) ->
+    %% exercise the unary API region params
+    Connection = ?config(grpc_connection, Config),
+
+    %% generate some keys to emulate an unasserted gw
+    #{public := LocalNodePubKey, secret := _LocalNodePrivKey} = libp2p_crypto:generate_keys(
+        ecc_compact
+    ),
+    GWAddr = libp2p_crypto:pubkey_to_bin(LocalNodePubKey),
+    Region = 'US915',
+
+    %% build request with bad sig
+    Req2 = build_region_params_req(Region, GWAddr, fun(_) -> <<"bad_signature">> end),
+
+    %% send the request
+    {ok, #{
+        headers := Headers2,
+        result := #{
+            msg := {error_resp, ResponseMsg2},
+            height := _ResponseHeight2,
+            block_time := _ResponseBlockTime2,
+            block_age := _ResponseBlockAge2,
+            signature := _ResponseSig2
+        } = Result2
+    }} = grpc_client:unary(
+        Connection,
+        Req2,
+        'helium.gateway',
+        'region_params',
+        gateway_client_pb,
+        []
+    ),
+    ct:pal("Response Headers: ~p", [Headers2]),
+    ct:pal("Response Body: ~p", [Result2]),
+    #{<<":status">> := HttpStatus2} = Headers2,
+    ?assertEqual(HttpStatus2, <<"200">>),
+    #{error := ErrorMsg2, details := _ErrorDetails2} = ResponseMsg2,
+    ?assertEqual(<<"bad_signature">>, ErrorMsg2),
+    ok.
 %
 %% ------------------------------------------------------------------
 %% Helper functions
 %% ------------------------------------------------------------------
+-spec build_region_params_req(atom(), libp2p_crypto:pubkey_bin(), function()) ->
+    #gateway_region_params_req_v1_pb{}.
+build_region_params_req(Region, Address, SigFun) ->
+    Req = #{address => Address, region => Region},
+    ReqEncoded = gateway_client_pb:encode_msg(Req, gateway_region_params_req_v1_pb),
+    Req#{signature => SigFun(ReqEncoded)}.

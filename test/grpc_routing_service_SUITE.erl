@@ -82,7 +82,7 @@ init_per_testcase(TestCase, Config) ->
     LocalSwarm = blockchain_swarm:tid(),
     ok = lists:foreach(
         fun(Node) ->
-            NodeSwarm = ct_rpc:call(Node, blockchain_swarm, swarm, [], 2000),
+            NodeSwarm = ct_rpc:call(Node, blockchain_swarm, tid, [], 2000),
             [H | _] = ct_rpc:call(Node, libp2p_swarm, listen_addrs, [NodeSwarm], 2000),
             libp2p_swarm:connect(LocalSwarm, H)
         end,
