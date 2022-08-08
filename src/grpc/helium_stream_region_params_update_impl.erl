@@ -139,7 +139,7 @@ region_params_for_addr(Addr, Ledger) ->
                             {ok, #gateway_region_params_streamed_resp_v1_pb{
                                 address = Addr,
                                 gain = Gain,
-                                region = normalize_region(Region),
+                                region = sibyl_utils:normalize_region(Region),
                                 params = #blockchain_region_params_v1_pb{
                                     region_params = Params
                                 }
@@ -173,9 +173,3 @@ send_region_params(Addr, Ledger, StreamState) ->
             %% doesnt really make sense to stream an error at this point
             StreamState
     end.
-
-%% blockchain_region_v1 returns region as an atom with a 'region_' prefix, ie
-%% 'region_us915' etc, we need it without the prefix and capitalised to
-%% be compatible with the proto
-normalize_region(V) ->
-    list_to_atom(string:to_upper(string:slice(atom_to_list(V), 7))).

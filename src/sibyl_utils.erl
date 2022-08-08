@@ -16,6 +16,7 @@
     | gateway_pb:gateway_poc_check_challenge_target_resp_v1_pb()
     | gateway_pb:gateway_public_routing_data_resp_v1_pb()
     | gateway_pb:gateway_region_params_streamed_resp_v1_pb()
+    | gateway_pb:gateway_region_params_resp_v1_pb()
     | gateway_pb:gateway_config_resp_v1_pb().
 
 %% API
@@ -31,7 +32,8 @@
     address_data/1,
     ensure/2,
     ensure/3,
-    default_version/0
+    default_version/0,
+    normalize_region/1
 ]).
 
 -spec make_event(binary()) -> sibyl_mgr:event().
@@ -60,6 +62,8 @@ make_asserted_gw_topic(Addr) ->
     function()
 ) -> gateway_pb:gateway_resp_v1_pb().
 
+encode_gateway_resp_v1(#gateway_region_params_resp_v1_pb{} = Msg, SigFun) ->
+    do_encode_gateway_resp_v1({region_params_resp, Msg}, SigFun);
 encode_gateway_resp_v1(#gateway_public_routing_data_resp_v1_pb{} = Msg, SigFun) ->
     do_encode_gateway_resp_v1({public_route, Msg}, SigFun);
 encode_gateway_resp_v1(#gateway_sc_is_active_resp_v1_pb{} = Msg, SigFun) ->
@@ -104,6 +108,12 @@ to_routing_pb(Route) ->
         filters = blockchain_ledger_routing_v1:filters(Route),
         subnets = blockchain_ledger_routing_v1:subnets(Route)
     }.
+
+%% blockchain_region_v1 returns region as an atom with a 'region_' prefix, ie
+%% 'region_us915' etc, we need it without the prefix and capitalised to
+%% be compatible with the proto
+normalize_region(V) ->
+    list_to_atom(string:to_upper(string:slice(atom_to_list(V), 7))).
 
 ensure(_, undefined) ->
     undefined;

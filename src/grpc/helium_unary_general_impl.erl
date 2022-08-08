@@ -20,7 +20,8 @@
     address_to_public_uri/2,
     config/2,
     validators/2,
-    version/2
+    version/2,
+    region_params/2
 ]).
 
 %% ------------------------------------------------------------------
@@ -62,6 +63,14 @@ version(Ctx, #gateway_version_req_v1_pb{} = _Message) ->
         sibyl_mgr:sigfun()
     ),
     {ok, Response, Ctx}.
+
+-spec region_params(
+    ctx:ctx(),
+    gateway_pb:gateway_region_params_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+region_params(Ctx, #gateway_region_params_req_v1_pb{} = Message) ->
+    Chain = sibyl_mgr:blockchain(),
+    region_params(Chain, Ctx, Message).
 
 %% ------------------------------------------------------------------
 %% callback breakout functions
@@ -206,6 +215,64 @@ validators(
     ),
     {ok, Response, Ctx}.
 
+-spec region_params(
+    undefined | blockchain:blockchain(),
+    ctx:ctx(),
+    gateway_pb:gateway_region_params_req_v1_pb()
+) -> {ok, gateway_pb:gateway_resp_v1_pb(), ctx:ctx()} | grpcbox_stream:grpc_error_response().
+region_params(
+    undefined = _Chain,
+    _Ctx,
+    #gateway_region_params_req_v1_pb{} = _Msg
+) ->
+    lager:debug("chain not ready, returning error response for msg ~p", [_Msg]),
+    {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
+region_params(
+    Chain,
+    Ctx,
+    #gateway_region_params_req_v1_pb{
+        address = GWAddr,
+        region = SpecifiedRegion
+    } = Request
+) ->
+    lager:debug("executing RPC region_params with msg ~p", [Request]),
+    Ledger = blockchain:ledger(Chain),
+    Response0 =
+        case verify_sig(Request) of
+            {false, SignedReq} ->
+                #gateway_error_resp_pb{
+                    error = <<"bad_signature">>,
+                    details = SignedReq
+                };
+            true ->
+                %% check if the GW has been asserted and if true use the region & gain included there
+                %% if not asserted then use the specified region and default gain to undefined
+                {Region, Gain} = maybe_use_asserted_region(
+                    GWAddr, sibyl_utils:ensure(atom, SpecifiedRegion), Ledger
+                ),
+                lager:debug("region: ~p, gain: ~p", [Region, Gain]),
+                case region_params_for_region(Region, Ledger) of
+                    {error, no_params_for_region = Reason} ->
+                        #gateway_error_resp_pb{
+                            error = sibyl_utils:ensure(binary, Reason),
+                            details = sibyl_utils:ensure(binary, Region)
+                        };
+                    {ok, Params} ->
+                        #gateway_region_params_resp_v1_pb{
+                            gain = Gain,
+                            region = Region,
+                            params = #blockchain_region_params_v1_pb{
+                                region_params = Params
+                            }
+                        }
+                end
+        end,
+    Response1 = sibyl_utils:encode_gateway_resp_v1(
+        Response0,
+        sibyl_mgr:sigfun()
+    ),
+    {ok, Response1, Ctx}.
+
 %% ------------------------------------------------------------------
 %% Internal functions
 %% ------------------------------------------------------------------
@@ -217,3 +284,58 @@ to_var(Key, undefined) ->
     };
 to_var(Key, V) ->
     blockchain_txn_vars_v1:to_var(Key, V).
+
+-spec region_params_for_region(libp2p_crypto:pubkey_bin(), blockchain_ledger_v1:ledger()) ->
+    {ok, [blockchain_region_param_v1:region_param_v1()]} | {error, any()}.
+region_params_for_region(Region, Ledger) ->
+    case blockchain_region_params_v1:for_region(Region, Ledger) of
+        {error, Reason} ->
+            lager:error(
+                "Could not get params for region: ~p, reason: ~p",
+                [Region, Reason]
+            ),
+            {error, no_params_for_region};
+        {ok, Params} ->
+            {ok, Params}
+    end.
+
+-spec maybe_use_asserted_region(libp2p_crypto:pubkey_bin(), atom(), blockchain_ledger_v1:ledger()) ->
+    {atom(), non_neg_integer()}.
+maybe_use_asserted_region(Addr, DefaultRegion, Ledger) ->
+    case blockchain_ledger_v1:find_gateway_info(Addr, Ledger) of
+        {ok, GWInfo} ->
+            Location = blockchain_ledger_gateway_v2:location(GWInfo),
+            case blockchain_region_v1:h3_to_region(Location, Ledger) of
+                {ok, Region} ->
+                    Gain = blockchain_ledger_gateway_v2:gain(GWInfo),
+                    lager:debug("got asserted region: ~p and gain: ~p for gateway: ~p", [
+                        Region, Gain, Addr
+                    ]),
+                    {sibyl_utils:normalize_region(Region), Gain};
+                {error, _Reason} ->
+                    {DefaultRegion, undefined}
+            end;
+        {error, _Reason} ->
+            {DefaultRegion, undefined}
+    end.
+
+-spec verify_sig(#gateway_region_params_req_v1_pb{}) ->
+    true | {false, binary()}.
+verify_sig(#gateway_region_params_req_v1_pb{address = Addr, signature = SignedReq} = Request) ->
+    BaseReq = Request#gateway_region_params_req_v1_pb{signature = <<>>},
+    do_verify_sig(Addr, BaseReq, SignedReq).
+
+-spec do_verify_sig(
+    libp2p_crypto:pubkey_bin(),
+    #gateway_region_params_req_v1_pb{},
+    binary()
+) -> true | {false, binary()}.
+do_verify_sig(Addr, BaseReq, SignedReq) ->
+    PubKey = libp2p_crypto:bin_to_pubkey(Addr),
+    EncodedReq = gateway_pb:encode_msg(BaseReq),
+    case libp2p_crypto:verify(EncodedReq, SignedReq, PubKey) of
+        false ->
+            {false, SignedReq};
+        true ->
+            true
+    end.
