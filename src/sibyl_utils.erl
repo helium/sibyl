@@ -233,39 +233,49 @@ check_for_public_uri(PubKeyBin) ->
     lager:debug("getting public addr for peer ~p", [PubKeyBin]),
     SwarmTID = blockchain_swarm:tid(),
     Peerbook = libp2p_swarm:peerbook(SwarmTID),
-    case libp2p_peerbook:get(Peerbook, PubKeyBin) of
-        {ok, Peer} ->
-            case maps:get(<<"grpc_address">>, libp2p_peer:signed_metadata(Peer), undefined) of
-                undefined ->
-                    %% sort listen addrs, ensure the public ip is at the head
-                    case libp2p_peer:cleared_listen_addrs(Peer) of
-                        [] ->
-                            {error, no_listen_addrs};
-                        ClearedListenAddrs ->
-                            case
-                                libp2p_transport:sort_addrs_with_keys(SwarmTID, ClearedListenAddrs)
-                            of
-                                [] ->
-                                    {error, no_listen_addrs};
-                                [H | _] ->
-                                    case has_addr_public_ip(H) of
-                                        {error, no_public_ip} = Error ->
-                                            Error;
-                                        {ok, IP} ->
-                                            {Port, SSL} = grpc_port(PubKeyBin),
-                                            {ok, format_uri(IP, SSL, Port)}
-                                    end
-                            end
-                    end;
-                Addr ->
-                    lager:debug("using gossiped grpc port ~p for gw ~p", [Addr, PubKeyBin]),
-                    {ok, Addr}
-            end;
-        {error, not_found} ->
-            %% refresh the peer
-            _ = libp2p_peerbook:refresh(Peerbook, PubKeyBin),
-            {error, peer_not_found}
-    end.
+    Res =
+        case libp2p_peerbook:get(Peerbook, PubKeyBin) of
+            {ok, Peer} ->
+                case maps:get(<<"grpc_address">>, libp2p_peer:signed_metadata(Peer), undefined) of
+                    undefined ->
+                        %% sort listen addrs, ensure the public ip is at the head
+                        case libp2p_peer:cleared_listen_addrs(Peer) of
+                            [] ->
+                                {error, no_listen_addrs};
+                            ClearedListenAddrs ->
+                                case
+                                    libp2p_transport:sort_addrs_with_keys(
+                                        SwarmTID, ClearedListenAddrs
+                                    )
+                                of
+                                    [] ->
+                                        {error, no_listen_addrs};
+                                    [H | _] ->
+                                        case has_addr_public_ip(H) of
+                                            {error, no_public_ip} = Error ->
+                                                Error;
+                                            {ok, IP} ->
+                                                {Port, SSL} = grpc_port(PubKeyBin),
+                                                {ok, format_uri(IP, SSL, Port)}
+                                        end
+                                end
+                        end;
+                    Addr ->
+                        lager:debug("using gossiped grpc port ~p for gw ~p", [Addr, PubKeyBin]),
+                        {ok, Addr}
+                end;
+            {error, not_found} ->
+                {error, peer_not_found}
+        end,
+    case Res of
+        {error, _} ->
+            %% if for any reason we dont have a public ip
+            %% refresh the peerbook, it may be stale
+            _ = libp2p_peerbook:refresh(Peerbook, PubKeyBin);
+        _ ->
+            ok
+    end,
+    Res.
 
 -spec check_for_alias(libp2p_crypto:pubkey_bin()) -> binary() | {error, atom()}.
 check_for_alias(PubKeyBin) ->
