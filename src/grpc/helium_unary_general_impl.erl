@@ -184,16 +184,18 @@ validators(
     lager:debug("chain not ready, returning error response for msg ~p", [_Msg]),
     {grpc_error, {grpcbox_stream:code_to_status(14), <<"temporarily unavailable">>}};
 validators(
-    _Chain,
+    Chain,
     Ctx,
     #gateway_validators_req_v1_pb{
         quantity = NumVals
     } = Request
 ) ->
     lager:debug("executing RPC validators with msg ~p", [Request]),
+    Ledger = blockchain:ledger(Chain),
     %% get list of current validators from the cache
     %% and then get a random sub set of these with size
     %% equal to NumVals
+    {ok, ConsensusAddrs} = blockchain_ledger_v1:consensus_members(Ledger),
     IgnoreVals = application:get_env(sibyl, validator_ignore_list, []),
     lager:debug("ignoring validators: ~p", [IgnoreVals]),
     Vals = sibyl_mgr:validators(),
@@ -201,7 +203,11 @@ validators(
         fun({PubKeyBin, _URL}) -> not lists:member(PubKeyBin, IgnoreVals) end,
         Vals
     ),
-    RandomVals = blockchain_utils:shuffle(Vals1),
+    Vals2 = lists:filter(
+        fun({PubKeyBin, _URL}) -> not lists:member(PubKeyBin, ConsensusAddrs) end,
+        Vals1
+    ),
+    RandomVals = blockchain_utils:shuffle(Vals2),
     SelectedVals = lists:sublist(RandomVals, max(1, min(NumVals, ?VALIDATOR_LIMIT))),
     lager:debug("randomly selected validators: ~p", [SelectedVals]),
 
