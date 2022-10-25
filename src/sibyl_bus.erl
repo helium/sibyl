@@ -7,7 +7,8 @@
     start/0,
     sub/2,
     pub/2,
-    leave/2
+    leave/2,
+    get_members/1
 ]).
 
 %% if release not defined default to 20, should be defined from otp21 and up
@@ -31,6 +32,9 @@ pub(Topic, Message) ->
     Members = pg:get_local_members(Topic),
     send_to_members(Members, Message).
 
+get_members(Topic) ->
+    pg:get_members(Topic).
+
 -else.
 
 start() ->
@@ -52,6 +56,9 @@ pub(Topic, Message) ->
         Members ->
             send_to_members(Members, Message)
     end.
+
+get_members(Topic) ->
+    pg2:get_members(Topic).
 
 -endif.
 
